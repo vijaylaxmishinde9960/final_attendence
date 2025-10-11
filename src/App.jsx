@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar'
 import Header from './components/Header'
 import Dashboard from './pages/Dashboard'
 import Employees from './pages/Employees'
+import Departments from './pages/Departments'
 import AttendanceOverview from './pages/AttendanceOverview'
 import Attendance from './pages/Attendance'
 import Reports from './pages/Reports'
@@ -41,6 +42,7 @@ function AppContent() {
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/employees" element={<Employees />} />
+              <Route path="/departments" element={<Departments />} />
               <Route path="/attendance-overview" element={<AttendanceOverview />} />
               <Route path="/attendance" element={<Attendance />} />
               <Route path="/reports" element={<Reports />} />

@@ -1,9 +1,9 @@
 @echo off
 echo Starting Flask Backend...
-start "Flask Backend" cmd /k "cd /d D:\Attendence-System-project-v3\attendence_management && python run.py"
+start "Flask Backend" cmd /k "python app.py"
 
 echo Starting React Frontend...
-start "React Frontend" cmd /k "cd /d D:\Attendence-System-project-v3\attendence_management && npm run dev"
+start "React Frontend" cmd /k "npm run dev"
 
 echo Both servers are starting...
 echo Flask Backend: http://localhost:5000

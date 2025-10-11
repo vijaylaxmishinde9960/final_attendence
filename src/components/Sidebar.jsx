@@ -7,12 +7,14 @@ import {
   BarChart3, 
   Clock,
   X,
-  User
+  User,
+  Building2
 } from 'lucide-react'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home },
   { name: 'Employees', href: '/employees', icon: Users },
+  { name: 'Departments', href: '/departments', icon: Building2 },
   { name: 'Attendance Overview', href: '/attendance-overview', icon: Calendar },
   { name: 'Attendance', href: '/attendance', icon: Calendar },
   { name: 'Monthly Reports', href: '/reports', icon: BarChart3 },

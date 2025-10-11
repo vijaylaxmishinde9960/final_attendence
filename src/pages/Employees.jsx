@@ -16,33 +16,57 @@ import toast from 'react-hot-toast'
 
 export default function Employees() {
   const [employees, setEmployees] = useState([])
+  const [departments, setDepartments] = useState([])
   const [selectedEmployee, setSelectedEmployee] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [formData, setFormData] = useState({
+    employee_id: '',
     name: '',
     email: '',
     phone: '',
-    department: '',
+    address: '',
+    department_id: '',
     position: '',
-    joiningDate: ''
+    hire_date: '',
+    salary: ''
   })
 
   useEffect(() => {
     fetchEmployees()
+    fetchDepartments()
   }, [])
 
   const fetchEmployees = async () => {
     try {
       setLoading(true)
-      const response = await axios.get('/admin/employees')
+      const token = localStorage.getItem('authToken')
+      const response = await axios.get('/admin/employees', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
       setEmployees(response.data)
     } catch (error) {
       toast.error('Failed to fetch employees')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchDepartments = async () => {
+    try {
+      const token = localStorage.getItem('authToken')
+      const response = await axios.get('/admin/departments', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      setDepartments(response.data)
+    } catch (error) {
+      console.error('Error fetching departments:', error)
     }
   }
 
@@ -56,18 +80,32 @@ export default function Employees() {
     }
 
     try {
-      const response = await axios.post('/admin/employees', {
+      const token = localStorage.getItem('authToken')
+      const payload = {
+        employee_id: formData.employee_id || undefined,
         name: formData.name,
         email: formData.email,
-        phone: formData.phone || null,
-        department: formData.department || null,
-        position: formData.position || null,
-        joining_date: formData.joiningDate || null
+        phone: formData.phone || undefined,
+        address: formData.address || undefined,
+        department_id: formData.department_id || undefined,
+        position: formData.position || undefined,
+        hire_date: formData.hire_date || undefined,
+        salary: formData.salary ? parseFloat(formData.salary) : undefined
+      }
+      
+      // Remove undefined values
+      Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key])
+      
+      const response = await axios.post('/admin/employees', payload, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       })
       
       toast.success(`${formData.name} has been added successfully!`)
       setShowAddModal(false)
-      setFormData({ name: '', email: '', phone: '', department: '', position: '', joiningDate: '' })
+      resetForm()
       
       // Refresh employee list
       await fetchEmployees()
@@ -82,38 +120,85 @@ export default function Employees() {
   const handleEditEmployee = async (e) => {
     e.preventDefault()
     try {
-      await axios.put(`/admin/employees/${selectedEmployee.id}`, formData)
+      const token = localStorage.getItem('authToken')
+      const payload = {
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone || undefined,
+        address: formData.address || undefined,
+        department_id: formData.department_id || undefined,
+        position: formData.position || undefined,
+        hire_date: formData.hire_date || undefined,
+        salary: formData.salary ? parseFloat(formData.salary) : undefined
+      }
+      
+      // Remove undefined values
+      Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key])
+      
+      await axios.put(`/admin/employees/${selectedEmployee.id}`, payload, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      
       toast.success('Employee updated successfully!')
       setShowEditModal(false)
       setSelectedEmployee(null)
-      setFormData({ name: '', email: '', phone: '', department: '', position: '', joiningDate: '' })
+      resetForm()
       fetchEmployees()
     } catch (error) {
-      toast.error('Failed to update employee')
+      console.error('Edit employee error:', error)
+      const errorMessage = error.response?.data?.message || 'Failed to update employee'
+      toast.error(errorMessage)
     }
   }
 
   const handleDeleteEmployee = async (employeeId) => {
     if (window.confirm('Are you sure you want to delete this employee?')) {
       try {
-        await axios.delete(`/admin/employees/${employeeId}`)
+        const token = localStorage.getItem('authToken')
+        await axios.delete(`/admin/employees/${employeeId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
         toast.success('Employee deleted successfully!')
         fetchEmployees()
       } catch (error) {
-        toast.error('Failed to delete employee')
+        console.error('Delete employee error:', error)
+        const errorMessage = error.response?.data?.message || 'Failed to delete employee'
+        toast.error(errorMessage)
       }
     }
+  }
+
+  const resetForm = () => {
+    setFormData({
+      employee_id: '',
+      name: '',
+      email: '',
+      phone: '',
+      address: '',
+      department_id: '',
+      position: '',
+      hire_date: '',
+      salary: ''
+    })
   }
 
   const openEditModal = (employee) => {
     setSelectedEmployee(employee)
     setFormData({
+      employee_id: employee.employee_id || '',
       name: employee.name || '',
       email: employee.email || '',
       phone: employee.phone || '',
-      department: employee.department || '',
+      address: employee.address || '',
+      department_id: employee.department_id || '',
       position: employee.position || '',
-      joiningDate: employee.joining_date || ''
+      hire_date: employee.hire_date || '',
+      salary: employee.salary ? employee.salary.toString() : ''
     })
     setShowEditModal(true)
   }
@@ -196,8 +281,11 @@ export default function Employees() {
                     <div>
                       <h3 className="font-semibold text-gray-900">{employee.name}</h3>
                       <p className="text-sm text-gray-600">{employee.email}</p>
-                      {employee.department && (
-                        <p className="text-xs text-gray-500">{employee.department}</p>
+                      {employee.department_name && (
+                        <p className="text-xs text-gray-500">{employee.department_name}</p>
+                      )}
+                      {employee.position && (
+                        <p className="text-xs text-gray-500">{employee.position}</p>
                       )}
                     </div>
                   </div>
@@ -254,18 +342,18 @@ export default function Employees() {
                   </div>
                 )}
                 
-                {selectedEmployee.department && (
+                {selectedEmployee.department_name && (
                   <div className="flex items-center space-x-3">
                     <Building className="w-4 h-4 text-gray-400" />
-                    <span className="text-sm text-gray-600">{selectedEmployee.department}</span>
+                    <span className="text-sm text-gray-600">{selectedEmployee.department_name}</span>
                   </div>
                 )}
                 
-                {selectedEmployee.joining_date && (
+                {selectedEmployee.hire_date && (
                   <div className="flex items-center space-x-3">
                     <Calendar className="w-4 h-4 text-gray-400" />
                     <span className="text-sm text-gray-600">
-                      Joined {new Date(selectedEmployee.joining_date).toLocaleDateString()}
+                      Joined {new Date(selectedEmployee.hire_date).toLocaleDateString()}
                     </span>
                   </div>
                 )}
@@ -298,21 +386,33 @@ export default function Employees() {
       {/* Add Employee Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+          <div className="bg-white rounded-lg p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Add New Employee</h3>
             <form onSubmit={handleAddEmployee} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                <input
-                  type="text"
-                  required
-                  className="input-field"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Employee ID</label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    value={formData.employee_id}
+                    onChange={(e) => setFormData({ ...formData, employee_id: e.target.value })}
+                    placeholder="Auto-generated if empty"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                  <input
+                    type="text"
+                    required
+                    className="input-field"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  />
+                </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
                 <input
                   type="email"
                   required
@@ -321,46 +421,78 @@ export default function Employees() {
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                <input
-                  type="tel"
-                  className="input-field"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                  <input
+                    type="tel"
+                    className="input-field"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Position</label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    value={formData.position}
+                    onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-                <input
-                  type="text"
+                <select
                   className="input-field"
-                  value={formData.department}
-                  onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                />
+                  value={formData.department_id || ''}
+                  onChange={(e) => setFormData({ ...formData, department_id: e.target.value ? parseInt(e.target.value) : '' })}
+                >
+                  <option value="">Select Department</option>
+                  {departments.map((dept) => (
+                    <option key={dept.id} value={dept.id}>
+                      {dept.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Position</label>
-                <input
-                  type="text"
-                  className="input-field"
-                  value={formData.position}
-                  onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                <textarea
+                  className="input-field resize-none"
+                  rows={2}
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  placeholder="Employee address"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Joining Date</label>
-                <input
-                  type="date"
-                  className="input-field"
-                  value={formData.joiningDate}
-                  onChange={(e) => setFormData({ ...formData, joiningDate: e.target.value })}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Hire Date</label>
+                  <input
+                    type="date"
+                    className="input-field"
+                    value={formData.hire_date}
+                    onChange={(e) => setFormData({ ...formData, hire_date: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Salary</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="input-field"
+                    value={formData.salary}
+                    onChange={(e) => setFormData({ ...formData, salary: e.target.value })}
+                    placeholder="0.00"
+                  />
+                </div>
               </div>
               <div className="flex space-x-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => { setShowAddModal(false); resetForm(); }}
                   className="btn-secondary flex-1"
                 >
                   Cancel
@@ -377,21 +509,33 @@ export default function Employees() {
       {/* Edit Employee Modal */}
       {showEditModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+          <div className="bg-white rounded-lg p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Edit Employee</h3>
             <form onSubmit={handleEditEmployee} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                <input
-                  type="text"
-                  required
-                  className="input-field"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Employee ID</label>
+                  <input
+                    type="text"
+                    className="input-field bg-gray-50"
+                    value={formData.employee_id}
+                    readOnly
+                    disabled
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                  <input
+                    type="text"
+                    required
+                    className="input-field"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  />
+                </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
                 <input
                   type="email"
                   required
@@ -400,46 +544,78 @@ export default function Employees() {
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                <input
-                  type="tel"
-                  className="input-field"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                  <input
+                    type="tel"
+                    className="input-field"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Position</label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    value={formData.position}
+                    onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-                <input
-                  type="text"
+                <select
                   className="input-field"
-                  value={formData.department}
-                  onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                />
+                  value={formData.department_id || ''}
+                  onChange={(e) => setFormData({ ...formData, department_id: e.target.value ? parseInt(e.target.value) : '' })}
+                >
+                  <option value="">Select Department</option>
+                  {departments.map((dept) => (
+                    <option key={dept.id} value={dept.id}>
+                      {dept.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Position</label>
-                <input
-                  type="text"
-                  className="input-field"
-                  value={formData.position}
-                  onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                <textarea
+                  className="input-field resize-none"
+                  rows={2}
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  placeholder="Employee address"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Joining Date</label>
-                <input
-                  type="date"
-                  className="input-field"
-                  value={formData.joiningDate}
-                  onChange={(e) => setFormData({ ...formData, joiningDate: e.target.value })}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Hire Date</label>
+                  <input
+                    type="date"
+                    className="input-field"
+                    value={formData.hire_date}
+                    onChange={(e) => setFormData({ ...formData, hire_date: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Salary</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="input-field"
+                    value={formData.salary}
+                    onChange={(e) => setFormData({ ...formData, salary: e.target.value })}
+                    placeholder="0.00"
+                  />
+                </div>
               </div>
               <div className="flex space-x-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setShowEditModal(false)}
+                  onClick={() => { setShowEditModal(false); setSelectedEmployee(null); resetForm(); }}
                   className="btn-secondary flex-1"
                 >
                   Cancel
