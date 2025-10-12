@@ -216,6 +216,21 @@ class FileStorage(db.Model):
     
     uploader = db.relationship('Admin', backref=db.backref('uploaded_files', lazy=True))
 
+class Holiday(db.Model):
+    __tablename__ = 'holidays'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    description = db.Column(Text, nullable=True)
+    is_recurring = db.Column(db.Boolean, default=False, nullable=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('admin.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    creator = db.relationship('Admin', backref=db.backref('created_holidays', lazy=True))
+    
+    __table_args__ = (db.UniqueConstraint('name', 'date', name='unique_holiday_name_date'),)
+
 class AuditLog(db.Model):
     __tablename__ = 'audit_logs'
     id = db.Column(db.Integer, primary_key=True)
@@ -593,6 +608,117 @@ def bulk_mark_attendance():
     
     return jsonify({'message': 'Bulk attendance marked successfully'})
 
+@app.route('/admin/attendance/<int:employee_id>/<string:date>', methods=['DELETE'])
+@jwt_required()
+def delete_attendance_record(employee_id, date):
+    """Delete a specific attendance record"""
+    try:
+        # Convert string date to date object
+        if isinstance(date, str):
+            date_obj = datetime.strptime(date, '%Y-%m-%d').date()
+        else:
+            date_obj = date
+        
+        # Find and delete the attendance record
+        attendance_record = Attendance.query.filter_by(
+            employee_id=employee_id,
+            date=date_obj
+        ).first()
+        
+        if attendance_record:
+            db.session.delete(attendance_record)
+            db.session.commit()
+            
+            # Log the action
+            log_audit_action(get_jwt_identity(), 'DELETE', 'attendance', attendance_record.id,
+                           {'employee_id': employee_id, 'date': date, 'status': attendance_record.status},
+                           None, f'Attendance record deleted for employee {employee_id} on {date}')
+            
+            return jsonify({'message': 'Attendance record deleted successfully'})
+        else:
+            return jsonify({'message': 'Attendance record not found'}), 404
+            
+    except Exception as e:
+        db.session.rollback()
+        print(f"Delete attendance error: {e}")
+        return jsonify({'message': 'Internal server error'}), 500
+
+@app.route('/admin/attendance/date/<string:date>', methods=['DELETE'])
+@jwt_required()
+def clear_attendance_by_date(date):
+    """Clear all attendance records for a specific date"""
+    try:
+        # Convert string date to date object
+        date_obj = datetime.strptime(date, '%Y-%m-%d').date()
+        
+        # Count records before deletion for logging
+        records_to_delete = Attendance.query.filter_by(date=date_obj).all()
+        deleted_count = len(records_to_delete)
+        
+        # Delete all attendance records for the date
+        Attendance.query.filter_by(date=date_obj).delete()
+        
+        db.session.commit()
+        
+        # Log the action
+        log_audit_action(get_jwt_identity(), 'DELETE', 'attendance', None,
+                       None, {'date': date, 'deleted_count': deleted_count},
+                       f'Cleared {deleted_count} attendance records for {date}')
+        
+        return jsonify({
+            'message': f'Successfully cleared {deleted_count} attendance records for {date}',
+            'deleted_count': deleted_count
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Clear attendance by date error: {e}")
+        return jsonify({'message': 'Internal server error'}), 500
+
+@app.route('/admin/attendance/month/<string:date>', methods=['DELETE'])
+@jwt_required()
+def clear_monthly_attendance(date):
+    """Clear all attendance records for a specific month"""
+    try:
+        # Convert string date to date object and get month boundaries
+        date_obj = datetime.strptime(date, '%Y-%m-%d').date()
+        first_day = date_obj.replace(day=1)
+        if first_day.month == 12:
+            last_day = first_day.replace(year=first_day.year + 1, month=1, day=1) - timedelta(days=1)
+        else:
+            last_day = first_day.replace(month=first_day.month + 1, day=1) - timedelta(days=1)
+        
+        # Count records before deletion for logging
+        records_to_delete = Attendance.query.filter(
+            Attendance.date >= first_day,
+            Attendance.date <= last_day
+        ).all()
+        
+        deleted_count = len(records_to_delete)
+        
+        # Delete all attendance records for the month
+        Attendance.query.filter(
+            Attendance.date >= first_day,
+            Attendance.date <= last_day
+        ).delete()
+        
+        db.session.commit()
+        
+        # Log the action
+        log_audit_action(get_jwt_identity(), 'DELETE', 'attendance', None,
+                       None, {'month': first_day.strftime('%Y-%m'), 'deleted_count': deleted_count},
+                       f'Cleared {deleted_count} attendance records for {first_day.strftime("%B %Y")}')
+        
+        return jsonify({
+            'message': f'Successfully cleared {deleted_count} attendance records for {first_day.strftime("%B %Y")}',
+            'deleted_count': deleted_count
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Clear monthly attendance error: {e}")
+        return jsonify({'message': 'Internal server error'}), 500
+
 @app.route('/admin/attendance/overview', methods=['GET'])
 @jwt_required()
 def get_attendance_overview():
@@ -656,6 +782,103 @@ def test_token():
         'user_id': current_user_id
     })
 
+@app.route('/admin/attendance/validate', methods=['GET'])
+@jwt_required()
+def validate_attendance_completion():
+    """Validate if all attendance is marked for the specified month up to today"""
+    try:
+        date_str = request.args.get('date', datetime.now().date().isoformat())
+        
+        # Convert string date to date object
+        if isinstance(date_str, str):
+            date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+        else:
+            date_obj = date_str
+            
+        # Get first day of the month
+        first_day = date_obj.replace(day=1)
+        today = datetime.now().date()
+        
+        # Only validate up to today if we're in the current month
+        if first_day.year == today.year and first_day.month == today.month:
+            last_day = today
+        else:
+            # For past/future months, get the last day of that month
+            if first_day.month == 12:
+                last_day = first_day.replace(year=first_day.year + 1, month=1, day=1) - timedelta(days=1)
+            else:
+                last_day = first_day.replace(month=first_day.month + 1, day=1) - timedelta(days=1)
+        
+        # Get all active employees
+        employees = Employee.query.filter_by(is_active=True).all()
+        
+        # Get holidays for the period
+        holidays = Holiday.query.filter(
+            Holiday.date >= first_day,
+            Holiday.date <= last_day
+        ).all()
+        holiday_dates = {holiday.date for holiday in holidays}
+        
+        # Get attendance records for the period
+        attendance_records = Attendance.query.filter(
+            Attendance.date >= first_day,
+            Attendance.date <= last_day
+        ).all()
+        
+        # Create attendance lookup
+        attendance_dict = {}
+        for record in attendance_records:
+            key = f"{record.employee_id}_{record.date.isoformat()}"
+            attendance_dict[key] = record.status
+        
+        # Count working days (excluding weekends and holidays)
+        working_days = []
+        current_date = first_day
+        while current_date <= last_day:
+            if current_date.weekday() < 5 and current_date not in holiday_dates:  # Exclude weekends and holidays
+                working_days.append(current_date)
+            current_date += timedelta(days=1)
+        
+        # Check for missing attendance
+        missing_attendance = []
+        total_expected_records = len(employees) * len(working_days)
+        actual_records = 0
+        
+        for employee in employees:
+            for work_day in working_days:
+                key = f"{employee.id}_{work_day.isoformat()}"
+                if key in attendance_dict:
+                    actual_records += 1
+                else:
+                    missing_attendance.append({
+                        'employee_id': employee.id,
+                        'employee_name': employee.name,
+                        'date': work_day.isoformat(),
+                        'date_formatted': work_day.strftime('%B %d, %Y')
+                    })
+        
+        completion_percentage = (actual_records / total_expected_records * 100) if total_expected_records > 0 else 100
+        
+        return jsonify({
+            'is_complete': len(missing_attendance) == 0,
+            'total_expected': total_expected_records,
+            'total_marked': actual_records,
+            'missing_count': len(missing_attendance),
+            'completion_percentage': round(completion_percentage, 1),
+            'missing_attendance': missing_attendance[:10],  # Limit to first 10 for display
+            'period': {
+                'start_date': first_day.isoformat(),
+                'end_date': last_day.isoformat(),
+                'month_name': first_day.strftime('%B %Y')
+            },
+            'working_days_count': len(working_days),
+            'employees_count': len(employees)
+        })
+        
+    except Exception as e:
+        print(f"Attendance validation error: {e}")
+        return jsonify({'error': f'Failed to validate attendance: {str(e)}'}), 500
+
 @app.route('/admin/attendance/export', methods=['GET'])
 @jwt_required()
 def export_attendance_monthly_report():
@@ -670,12 +893,29 @@ def export_attendance_monthly_report():
         else:
             date_obj = date_str
             
-        # Get first and last day of the month
+        # Get first day of the month and last day
         first_day = date_obj.replace(day=1)
+        today = datetime.now().date()
+        
+        # Check if user wants to force full month export
+        force_full_month = request.args.get('force_full_month', 'false').lower() == 'true'
+        
+        # Calculate the last day of the month
         if first_day.month == 12:
-            last_day = first_day.replace(year=first_day.year + 1, month=1, day=1) - timedelta(days=1)
+            month_last_day = first_day.replace(year=first_day.year + 1, month=1, day=1) - timedelta(days=1)
         else:
-            last_day = first_day.replace(month=first_day.month + 1, day=1) - timedelta(days=1)
+            month_last_day = first_day.replace(month=first_day.month + 1, day=1) - timedelta(days=1)
+        
+        # Determine export range
+        if force_full_month:
+            last_day = month_last_day  # Force full month when requested
+            print(f"Force full month export: {first_day} to {last_day}")
+        elif first_day.year == today.year and first_day.month == today.month:
+            last_day = today  # Only show dates up to today for current month
+            print(f"Current month partial export: {first_day} to {last_day}")
+        else:
+            last_day = month_last_day  # Show full month for past/future months
+            print(f"Full month export: {first_day} to {last_day}")
         
         # Get all employees
         employees = Employee.query.filter_by(is_active=True).all()
@@ -687,6 +927,23 @@ def export_attendance_monthly_report():
             Attendance.date <= last_day
         ).all()
         print(f"Found {len(attendance_records)} attendance records for the month")
+        
+        # Get holidays for the month
+        try:
+            holidays = Holiday.query.filter(
+                Holiday.date >= first_day,
+                Holiday.date <= last_day
+            ).all()
+            print(f"Found {len(holidays)} holidays for the month")
+        except Exception as e:
+            print(f"Error fetching holidays: {e}")
+            holidays = []
+        
+        # Create holiday lookup dictionary
+        holiday_dict = {}
+        for holiday in holidays:
+            holiday_dict[holiday.date.isoformat()] = holiday.name
+            print(f"Holiday mapped: {holiday.date.isoformat()} -> {holiday.name}")
         
         # Create attendance lookup dictionary
         attendance_dict = {}
@@ -701,10 +958,19 @@ def export_attendance_monthly_report():
             all_dates.append(current_date)
             current_date += timedelta(days=1)
         
-        # Create Excel workbook
+        # Create Excel workbook with compatibility settings
         wb = Workbook()
         ws = wb.active
-        ws.title = f"Attendance Overview - {first_day.strftime('%B %Y')}"
+        # Ensure worksheet title is Excel-safe
+        safe_title = f"Attendance {first_day.strftime('%B %Y')}"
+        # Remove any characters that might cause issues
+        safe_title = ''.join(c for c in safe_title if c.isalnum() or c in ' -_')
+        ws.title = safe_title[:31]  # Excel sheet names max 31 chars
+        
+        # Set workbook properties for compatibility
+        wb.properties.title = f"Attendance Overview - {first_day.strftime('%B %Y')}"
+        wb.properties.subject = "Employee Attendance Report"
+        wb.properties.creator = "Attendance Management System"
         
         # Define styles
         header_font = Font(bold=True, color="FFFFFF")
@@ -715,78 +981,125 @@ def export_attendance_monthly_report():
         # Status color mapping
         status_fills = {
             'present': PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid"),
-            'halfday': PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid"),
+            'half_day': PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid"),
             'absent': PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid"),
             'leave': PatternFill(start_color="ADD8E6", end_color="ADD8E6", fill_type="solid"),
             'overtime': PatternFill(start_color="DDA0DD", end_color="DDA0DD", fill_type="solid")
         }
         
+        # Holiday fill pattern (red background)
+        holiday_fill = PatternFill(start_color="FFE6E6", end_color="FFE6E6", fill_type="solid")
+        
         # Create headers
         headers = ['Employee ID', 'Employee Name', 'Email', 'Department']
         for date in all_dates:
-            headers.append(f"{date.day}\n{date.strftime('%a')}")
+            # Remove newlines to avoid Excel warnings
+            headers.append(f"{date.day} {date.strftime('%a')}")
         headers.extend(['Present', 'Half Day', 'Absent', 'Leave', 'Overtime', 'Total Working Days'])
         
-        # Set headers
+        # Set headers with improved formatting
         for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col, value=header)
+            cell = ws.cell(row=1, column=col, value=str(header))  # Ensure string value
             cell.font = header_font
             cell.fill = header_fill
             cell.alignment = center_alignment
         
+        # Set header row height
+        ws.row_dimensions[1].height = 25
+        
         # Add employee data
         for row, employee in enumerate(employees, 2):
-            # Employee info
-            ws.cell(row=row, column=1, value=employee.employee_id or employee.id)
-            ws.cell(row=row, column=2, value=employee.name)
-            ws.cell(row=row, column=3, value=employee.email)
-            ws.cell(row=row, column=4, value=employee.department.name if employee.department else 'N/A')
+            # Employee info - ensure all values are clean strings
+            employee_id = str(employee.id) if employee.id else 'N/A'
+            employee_name = str(employee.name).strip() if employee.name else 'N/A'
+            employee_email = str(employee.email).strip() if employee.email else 'N/A'
+            
+            # Handle department - check if it's a relationship object or string
+            if hasattr(employee, 'department') and employee.department:
+                if hasattr(employee.department, 'name'):
+                    dept_name = str(employee.department.name).strip() if employee.department.name else 'N/A'
+                else:
+                    dept_name = str(employee.department).strip()
+            else:
+                dept_name = 'N/A'
+            
+            ws.cell(row=row, column=1, value=employee_id)
+            ws.cell(row=row, column=2, value=employee_name)
+            ws.cell(row=row, column=3, value=employee_email)
+            ws.cell(row=row, column=4, value=dept_name)
             
             # Attendance data for each day
-            stats = {'present': 0, 'halfday': 0, 'absent': 0, 'leave': 0, 'overtime': 0}
+            stats = {'present': 0, 'half_day': 0, 'absent': 0, 'leave': 0, 'overtime': 0}
             
             for col_idx, date in enumerate(all_dates, 5):
                 key = f"{employee.id}_{date.isoformat()}"
                 status = attendance_dict.get(key, '')
+                date_str = date.isoformat()
+                is_holiday = date_str in holiday_dict
+                holiday_name = holiday_dict.get(date_str, '')
                 
-                cell = ws.cell(row=row, column=col_idx, value=status.replace('_', ' ').title() if status else '')
-                cell.alignment = center_alignment
-                
-                # Apply color coding
-                if status in status_fills:
-                    cell.fill = status_fills[status]
+                # Determine display value and fill
+                if is_holiday:
+                    # Show holiday name (keep it concise for Excel cells)
+                    if len(holiday_name) > 15:
+                        display_value = f"Holiday: {holiday_name[:12]}..."
+                    else:
+                        display_value = f"Holiday: {holiday_name}"
+                    cell_fill = holiday_fill
+                elif status:
+                    display_value = status.replace('_', ' ').title()
+                    cell_fill = status_fills.get(status, None)
                     if status in stats:
                         stats[status] += 1
                 elif date.weekday() >= 5:  # Weekend
-                    cell.fill = weekend_fill
+                    display_value = ''
+                    cell_fill = weekend_fill
+                else:
+                    display_value = ''
+                    cell_fill = None
+                
+                cell = ws.cell(row=row, column=col_idx, value=display_value)
+                cell.alignment = center_alignment
+                
+                # Apply the determined fill
+                if cell_fill:
+                    cell.fill = cell_fill
             
-            # Add summary statistics
+            # Add summary statistics with proper numeric formatting
             stats_start_col = len(all_dates) + 5
-            ws.cell(row=row, column=stats_start_col, value=stats['present'])
-            ws.cell(row=row, column=stats_start_col + 1, value=stats['halfday'])
-            ws.cell(row=row, column=stats_start_col + 2, value=stats['absent'])
-            ws.cell(row=row, column=stats_start_col + 3, value=stats['leave'])
-            ws.cell(row=row, column=stats_start_col + 4, value=stats['overtime'])
-            ws.cell(row=row, column=stats_start_col + 5, value=sum(stats.values()))
+            ws.cell(row=row, column=stats_start_col, value=int(stats['present']))
+            ws.cell(row=row, column=stats_start_col + 1, value=int(stats['half_day']))
+            ws.cell(row=row, column=stats_start_col + 2, value=int(stats['absent']))
+            ws.cell(row=row, column=stats_start_col + 3, value=int(stats['leave']))
+            ws.cell(row=row, column=stats_start_col + 4, value=int(stats['overtime']))
+            ws.cell(row=row, column=stats_start_col + 5, value=int(sum(stats.values())))
         
-        # Auto-adjust column widths
+        # Auto-adjust column widths safely
         for column in ws.columns:
             max_length = 0
             column_letter = column[0].column_letter
             for cell in column:
                 try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = min(max(max_length + 2, 8), 25)
+                    if cell.value is not None:
+                        cell_length = len(str(cell.value))
+                        if cell_length > max_length:
+                            max_length = cell_length
+                except Exception:
+                    continue  # Skip problematic cells
+            # Ensure reasonable width bounds
+            adjusted_width = min(max(max_length + 2, 10), 30)
             ws.column_dimensions[column_letter].width = adjusted_width
         
-        # Save to BytesIO buffer
+        # Save to BytesIO buffer with proper handling
         output = io.BytesIO()
-        wb.save(output)
-        file_data = output.getvalue()
-        output.seek(0)
+        try:
+            wb.save(output)
+            output.seek(0)
+            file_data = output.getvalue()
+            output.seek(0)  # Reset for send_file
+        except Exception as save_error:
+            print(f"Error saving workbook: {save_error}")
+            raise
         
         # Create filename
         filename = f"attendance_overview_{first_day.strftime('%Y%m')}.xlsx"
@@ -910,7 +1223,7 @@ def export_attendance_monthly_report_pdf():
         table_data = [['Employee', 'Present', 'Half Day', 'Absent', 'Leave', 'Overtime', 'Total Days', 'Attendance %']]
         
         for employee in employees:
-            stats = {'present': 0, 'halfday': 0, 'absent': 0, 'leave': 0, 'overtime': 0}
+            stats = {'present': 0, 'half_day': 0, 'absent': 0, 'leave': 0, 'overtime': 0}
             
             for date in all_dates:
                 if date.weekday() < 5:  # Only count working days
@@ -925,7 +1238,7 @@ def export_attendance_monthly_report_pdf():
             table_data.append([
                 employee.name,
                 str(stats['present']),
-                str(stats['halfday']),
+                str(stats['half_day']),
                 str(stats['absent']),
                 str(stats['leave']),
                 str(stats['overtime']),
@@ -1300,6 +1613,196 @@ def approve_leave(leave_id):
         print(f"Leave approval error: {e}")
         return jsonify({'message': 'Internal server error'}), 500
 
+# Holiday Management Endpoints
+@app.route('/admin/holidays', methods=['GET'])
+@jwt_required()
+def get_holidays():
+    """Get all holidays"""
+    try:
+        holidays = Holiday.query.order_by(Holiday.date.asc()).all()
+        return jsonify([{
+            'id': holiday.id,
+            'name': holiday.name,
+            'date': holiday.date.isoformat(),
+            'description': holiday.description,
+            'is_recurring': holiday.is_recurring,
+            'created_by': holiday.creator.username if holiday.creator else None,
+            'created_at': holiday.created_at.isoformat()
+        } for holiday in holidays])
+    except Exception as e:
+        print(f"Get holidays error: {e}")
+        return jsonify({'message': 'Internal server error'}), 500
+
+@app.route('/admin/holidays', methods=['POST'])
+@jwt_required()
+def add_holiday():
+    """Add a new holiday"""
+    try:
+        data = request.get_json()
+        name = data.get('name')
+        date_str = data.get('date')
+        description = data.get('description', '')
+        is_recurring = data.get('is_recurring', False)
+        
+        if not name or not date_str:
+            return jsonify({'message': 'Holiday name and date are required'}), 400
+        
+        # Parse the date
+        try:
+            holiday_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'message': 'Invalid date format. Use YYYY-MM-DD'}), 400
+        
+        # Check if holiday already exists on this date
+        existing_holiday = Holiday.query.filter_by(date=holiday_date).first()
+        if existing_holiday:
+            return jsonify({
+                'message': f'A holiday "{existing_holiday.name}" already exists on {date_str}'
+            }), 400
+        
+        # Create new holiday
+        holiday = Holiday(
+            name=name.strip(),
+            date=holiday_date,
+            description=description.strip() if description else None,
+            is_recurring=is_recurring,
+            created_by=get_jwt_identity()
+        )
+        
+        db.session.add(holiday)
+        db.session.commit()
+        
+        # Log the action
+        log_audit_action(get_jwt_identity(), 'CREATE', 'holidays', holiday.id, 
+                        None, {
+                            'name': name,
+                            'date': date_str,
+                            'description': description,
+                            'is_recurring': is_recurring
+                        }, f'Holiday "{name}" created')
+        
+        return jsonify({
+            'id': holiday.id,
+            'name': holiday.name,
+            'date': holiday.date.isoformat(),
+            'description': holiday.description,
+            'is_recurring': holiday.is_recurring,
+            'created_by': holiday.creator.username if holiday.creator else None,
+            'created_at': holiday.created_at.isoformat(),
+            'message': f'Holiday "{name}" added successfully'
+        }), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Add holiday error: {e}")
+        return jsonify({'message': 'Internal server error'}), 500
+
+@app.route('/admin/holidays/<int:holiday_id>', methods=['PUT'])
+@jwt_required()
+def update_holiday(holiday_id):
+    """Update an existing holiday"""
+    try:
+        holiday = Holiday.query.get_or_404(holiday_id)
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'message': 'No data provided'}), 400
+        
+        name = data.get('name', holiday.name)
+        date_str = data.get('date')
+        description = data.get('description', holiday.description)
+        is_recurring = data.get('is_recurring', holiday.is_recurring)
+        
+        # Store old values for audit log
+        old_values = {
+            'name': holiday.name,
+            'date': holiday.date.isoformat(),
+            'description': holiday.description,
+            'is_recurring': holiday.is_recurring
+        }
+        
+        # Parse new date if provided
+        if date_str:
+            try:
+                holiday_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({'message': 'Invalid date format. Use YYYY-MM-DD'}), 400
+            
+            # Check if another holiday exists on this date (excluding current holiday)
+            if holiday_date != holiday.date:
+                existing_holiday = Holiday.query.filter(
+                    Holiday.date == holiday_date,
+                    Holiday.id != holiday_id
+                ).first()
+                if existing_holiday:
+                    return jsonify({
+                        'message': f'A holiday "{existing_holiday.name}" already exists on {date_str}'
+                    }), 400
+        else:
+            holiday_date = holiday.date
+        
+        # Update holiday
+        holiday.name = name.strip()
+        holiday.date = holiday_date
+        holiday.description = description.strip() if description else None
+        holiday.is_recurring = is_recurring
+        
+        db.session.commit()
+        
+        # Log the action
+        new_values = {
+            'name': holiday.name,
+            'date': holiday.date.isoformat(),
+            'description': holiday.description,
+            'is_recurring': holiday.is_recurring
+        }
+        log_audit_action(get_jwt_identity(), 'UPDATE', 'holidays', holiday.id, 
+                        old_values, new_values, f'Holiday "{holiday.name}" updated')
+        
+        return jsonify({
+            'id': holiday.id,
+            'name': holiday.name,
+            'date': holiday.date.isoformat(),
+            'description': holiday.description,
+            'is_recurring': holiday.is_recurring,
+            'created_by': holiday.creator.username if holiday.creator else None,
+            'created_at': holiday.created_at.isoformat(),
+            'message': f'Holiday "{holiday.name}" updated successfully'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Update holiday error: {e}")
+        return jsonify({'message': 'Internal server error'}), 500
+
+@app.route('/admin/holidays/<int:holiday_id>', methods=['DELETE'])
+@jwt_required()
+def delete_holiday(holiday_id):
+    """Delete a holiday"""
+    try:
+        holiday = Holiday.query.get_or_404(holiday_id)
+        holiday_name = holiday.name
+        holiday_date = holiday.date.isoformat()
+        
+        db.session.delete(holiday)
+        db.session.commit()
+        
+        # Log the action
+        log_audit_action(get_jwt_identity(), 'DELETE', 'holidays', holiday_id, 
+                        {
+                            'name': holiday_name,
+                            'date': holiday_date
+                        }, None, f'Holiday "{holiday_name}" deleted')
+        
+        return jsonify({
+            'message': f'Holiday "{holiday_name}" deleted successfully'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Delete holiday error: {e}")
+        return jsonify({'message': 'Internal server error'}), 500
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
@@ -1327,5 +1830,30 @@ if __name__ == '__main__':
             db.session.add(dept)
             db.session.commit()
             print("Default department 'General' created")
+        
+        # Create default holidays if not exists
+        current_year = datetime.now().year
+        default_holidays = [
+            {'name': 'New Year Day', 'date': f'{current_year}-01-01'},
+            {'name': 'Christmas Day', 'date': f'{current_year}-12-25'},
+        ]
+        
+        for holiday_data in default_holidays:
+            existing_holiday = Holiday.query.filter_by(
+                name=holiday_data['name'],
+                date=datetime.strptime(holiday_data['date'], '%Y-%m-%d').date()
+            ).first()
+            
+            if not existing_holiday:
+                holiday = Holiday(
+                    name=holiday_data['name'],
+                    date=datetime.strptime(holiday_data['date'], '%Y-%m-%d').date(),
+                    description=f"Default {holiday_data['name']} holiday",
+                    created_by=admin.id
+                )
+                db.session.add(holiday)
+        
+        db.session.commit()
+        print(f"Default holidays checked/created for year {current_year}")
     
     app.run(debug=True, host='0.0.0.0', port=5000)
