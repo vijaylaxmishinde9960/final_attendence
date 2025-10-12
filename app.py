@@ -593,6 +593,59 @@ def bulk_mark_attendance():
     
     return jsonify({'message': 'Bulk attendance marked successfully'})
 
+@app.route('/admin/attendance/overview', methods=['GET'])
+@jwt_required()
+def get_attendance_overview():
+    """Get monthly attendance overview for all employees"""
+    try:
+        date_str = request.args.get('date', datetime.now().date().isoformat())
+        
+        # Convert to date object and get month boundaries
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+        first_day = date_obj.replace(day=1)
+        if first_day.month == 12:
+            last_day = first_day.replace(year=first_day.year + 1, month=1, day=1) - timedelta(days=1)
+        else:
+            last_day = first_day.replace(month=first_day.month + 1, day=1) - timedelta(days=1)
+        
+        # Get all active employees
+        employees = Employee.query.filter_by(is_active=True).all()
+        
+        # Get all attendance records for the month
+        attendance_records = Attendance.query.filter(
+            Attendance.date >= first_day,
+            Attendance.date <= last_day
+        ).all()
+        
+        # Create attendance lookup dictionary
+        attendance_dict = {}
+        for record in attendance_records:
+            employee_id = record.employee_id
+            date_key = record.date.isoformat()
+            
+            if employee_id not in attendance_dict:
+                attendance_dict[employee_id] = {}
+            
+            attendance_dict[employee_id][date_key] = record.status
+        
+        return jsonify({
+            'month': first_day.strftime('%Y-%m'),
+            'first_day': first_day.isoformat(),
+            'last_day': last_day.isoformat(),
+            'employees': [{
+                'id': emp.id,
+                'employee_id': emp.employee_id,
+                'name': emp.name,
+                'email': emp.email,
+                'department': emp.department.name if emp.department else None
+            } for emp in employees],
+            'attendance_data': attendance_dict
+        })
+        
+    except Exception as e:
+        print(f"Attendance overview error: {e}")
+        return jsonify({'error': 'Failed to fetch attendance overview'}), 500
+
 @app.route('/admin/test-token', methods=['GET'])
 @jwt_required()
 def test_token():
@@ -605,89 +658,116 @@ def test_token():
 
 @app.route('/admin/attendance/export', methods=['GET'])
 @jwt_required()
-def export_attendance_report():
-    """Export attendance report to Excel file"""
+def export_attendance_monthly_report():
+    """Export full month attendance report to Excel file"""
     try:
         date_str = request.args.get('date', datetime.now().date().isoformat())
-        print(f"Export request for date: {date_str}")
+        print(f"Monthly export request for date: {date_str}")
         
-        # Debug: Log authorization header
-        auth_header = request.headers.get('Authorization', 'No Authorization header')
-        print(f"Authorization header: {auth_header}")
-        
-        # Debug: Get current user
-        current_user_id = get_jwt_identity()
-        print(f"Current user ID: {current_user_id}")
-        
-        # Convert string date to date object
+        # Convert string date to date object and get month start/end
         if isinstance(date_str, str):
             date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
         else:
             date_obj = date_str
-    
+            
+        # Get first and last day of the month
+        first_day = date_obj.replace(day=1)
+        if first_day.month == 12:
+            last_day = first_day.replace(year=first_day.year + 1, month=1, day=1) - timedelta(days=1)
+        else:
+            last_day = first_day.replace(month=first_day.month + 1, day=1) - timedelta(days=1)
+        
         # Get all employees
-        employees = Employee.query.all()
-        print(f"Found {len(employees)} employees")
+        employees = Employee.query.filter_by(is_active=True).all()
+        print(f"Found {len(employees)} active employees")
         
-        # Get attendance for the specified date
-        attendance_records = Attendance.query.filter_by(date=date_obj).all()
-        print(f"Found {len(attendance_records)} attendance records")
+        # Get all attendance records for the month
+        attendance_records = Attendance.query.filter(
+            Attendance.date >= first_day,
+            Attendance.date <= last_day
+        ).all()
+        print(f"Found {len(attendance_records)} attendance records for the month")
         
-        # Create a dictionary for quick lookup
-        attendance_dict = {record.employee_id: record.status for record in attendance_records}
+        # Create attendance lookup dictionary
+        attendance_dict = {}
+        for record in attendance_records:
+            key = f"{record.employee_id}_{record.date.isoformat()}"
+            attendance_dict[key] = record.status
+        
+        # Generate all dates in the month
+        current_date = first_day
+        all_dates = []
+        while current_date <= last_day:
+            all_dates.append(current_date)
+            current_date += timedelta(days=1)
         
         # Create Excel workbook
         wb = Workbook()
         ws = wb.active
-        ws.title = f"Attendance Report - {date_obj.strftime('%Y-%m-%d')}"
+        ws.title = f"Attendance Overview - {first_day.strftime('%B %Y')}"
         
         # Define styles
         header_font = Font(bold=True, color="FFFFFF")
         header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
         center_alignment = Alignment(horizontal="center", vertical="center")
+        weekend_fill = PatternFill(start_color="F0F0F0", end_color="F0F0F0", fill_type="solid")
         
-        # Set column headers
-        headers = ['Employee ID', 'Employee Name', 'Email', 'Status', 'Date']
+        # Status color mapping
+        status_fills = {
+            'present': PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid"),
+            'halfday': PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid"),
+            'absent': PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid"),
+            'leave': PatternFill(start_color="ADD8E6", end_color="ADD8E6", fill_type="solid"),
+            'overtime': PatternFill(start_color="DDA0DD", end_color="DDA0DD", fill_type="solid")
+        }
+        
+        # Create headers
+        headers = ['Employee ID', 'Employee Name', 'Email', 'Department']
+        for date in all_dates:
+            headers.append(f"{date.day}\n{date.strftime('%a')}")
+        headers.extend(['Present', 'Half Day', 'Absent', 'Leave', 'Overtime', 'Total Working Days'])
+        
+        # Set headers
         for col, header in enumerate(headers, 1):
             cell = ws.cell(row=1, column=col, value=header)
             cell.font = header_font
             cell.fill = header_fill
             cell.alignment = center_alignment
         
-        # Add data rows
-        present_count = 0
-        absent_count = 0
-        not_marked_count = 0
-        
+        # Add employee data
         for row, employee in enumerate(employees, 2):
-            status = attendance_dict.get(employee.id, 'Not Marked')
-            
-            # Count statuses
-            if status == 'present':
-                present_count += 1
-            elif status == 'absent':
-                absent_count += 1
-            else:
-                not_marked_count += 1
-            
-            # Add employee data
-            ws.cell(row=row, column=1, value=employee.id)
+            # Employee info
+            ws.cell(row=row, column=1, value=employee.employee_id or employee.id)
             ws.cell(row=row, column=2, value=employee.name)
             ws.cell(row=row, column=3, value=employee.email)
-            ws.cell(row=row, column=4, value=status)
-            ws.cell(row=row, column=5, value=date_obj.strftime('%Y-%m-%d'))
-        
-        # Add summary section
-        summary_row = len(employees) + 3
-        ws.cell(row=summary_row, column=1, value="SUMMARY").font = Font(bold=True)
-        ws.cell(row=summary_row + 1, column=1, value="Total Employees:")
-        ws.cell(row=summary_row + 1, column=2, value=len(employees))
-        ws.cell(row=summary_row + 2, column=1, value="Present:")
-        ws.cell(row=summary_row + 2, column=2, value=present_count)
-        ws.cell(row=summary_row + 3, column=1, value="Absent:")
-        ws.cell(row=summary_row + 3, column=2, value=absent_count)
-        ws.cell(row=summary_row + 4, column=1, value="Not Marked:")
-        ws.cell(row=summary_row + 4, column=2, value=not_marked_count)
+            ws.cell(row=row, column=4, value=employee.department.name if employee.department else 'N/A')
+            
+            # Attendance data for each day
+            stats = {'present': 0, 'halfday': 0, 'absent': 0, 'leave': 0, 'overtime': 0}
+            
+            for col_idx, date in enumerate(all_dates, 5):
+                key = f"{employee.id}_{date.isoformat()}"
+                status = attendance_dict.get(key, '')
+                
+                cell = ws.cell(row=row, column=col_idx, value=status.replace('_', ' ').title() if status else '')
+                cell.alignment = center_alignment
+                
+                # Apply color coding
+                if status in status_fills:
+                    cell.fill = status_fills[status]
+                    if status in stats:
+                        stats[status] += 1
+                elif date.weekday() >= 5:  # Weekend
+                    cell.fill = weekend_fill
+            
+            # Add summary statistics
+            stats_start_col = len(all_dates) + 5
+            ws.cell(row=row, column=stats_start_col, value=stats['present'])
+            ws.cell(row=row, column=stats_start_col + 1, value=stats['halfday'])
+            ws.cell(row=row, column=stats_start_col + 2, value=stats['absent'])
+            ws.cell(row=row, column=stats_start_col + 3, value=stats['leave'])
+            ws.cell(row=row, column=stats_start_col + 4, value=stats['overtime'])
+            ws.cell(row=row, column=stats_start_col + 5, value=sum(stats.values()))
         
         # Auto-adjust column widths
         for column in ws.columns:
@@ -699,7 +779,7 @@ def export_attendance_report():
                         max_length = len(str(cell.value))
                 except:
                     pass
-            adjusted_width = min(max_length + 2, 50)
+            adjusted_width = min(max(max_length + 2, 8), 25)
             ws.column_dimensions[column_letter].width = adjusted_width
         
         # Save to BytesIO buffer
@@ -709,7 +789,7 @@ def export_attendance_report():
         output.seek(0)
         
         # Create filename
-        filename = f"attendance_report_{date_obj.strftime('%Y%m%d')}.xlsx"
+        filename = f"attendance_overview_{first_day.strftime('%Y%m')}.xlsx"
         print(f"Excel file created: {filename}")
         
         # Save file to database
@@ -718,7 +798,7 @@ def export_attendance_report():
                 file_data=file_data,
                 filename=filename,
                 file_type='excel',
-                description=f'Attendance report for {date_obj.strftime("%Y-%m-%d")}',
+                description=f'Monthly attendance overview for {first_day.strftime("%B %Y")}',
                 related_table='attendance',
                 related_id=None
             )
@@ -726,7 +806,7 @@ def export_attendance_report():
             # Log the export action
             log_audit_action(get_jwt_identity(), 'EXPORT', 'attendance', None, 
                            None, {'filename': filename, 'file_id': file_id}, 
-                           f'Excel report exported for {date_obj.strftime("%Y-%m-%d")}')
+                           f'Monthly Excel report exported for {first_day.strftime("%B %Y")}')
             
             print(f"File saved to database with ID: {file_id}")
         except Exception as e:
@@ -744,31 +824,46 @@ def export_attendance_report():
 
 @app.route('/admin/attendance/export-pdf', methods=['GET'])
 @jwt_required()
-def export_attendance_report_pdf():
-    """Export attendance report to PDF file"""
+def export_attendance_monthly_report_pdf():
+    """Export monthly attendance report to PDF file"""
     try:
         date_str = request.args.get('date', datetime.now().date().isoformat())
-        employee_id = request.args.get('employee_id')
+        print(f"Monthly PDF Export request for date: {date_str}")
         
-        print(f"PDF Export request for date: {date_str}, employee_id: {employee_id}")
-        
-        # Convert string date to date object
+        # Convert string date to date object and get month start/end
         if isinstance(date_str, str):
             date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
         else:
             date_obj = date_str
-        
-        # Get employees
-        if employee_id:
-            employees = Employee.query.filter_by(id=employee_id).all()
-            filename = f"attendance_report_{employees[0].name.replace(' ', '_')}_{date_obj.strftime('%Y-%m-%d')}.pdf"
+            
+        # Get first and last day of the month
+        first_day = date_obj.replace(day=1)
+        if first_day.month == 12:
+            last_day = first_day.replace(year=first_day.year + 1, month=1, day=1) - timedelta(days=1)
         else:
-            employees = Employee.query.all()
-            filename = f"attendance_overview_{date_obj.strftime('%Y-%m-%d')}.pdf"
+            last_day = first_day.replace(month=first_day.month + 1, day=1) - timedelta(days=1)
         
-        # Get attendance for the specified date
-        attendance_records = Attendance.query.filter_by(date=date_obj).all()
-        attendance_dict = {record.employee_id: record.status for record in attendance_records}
+        # Get all active employees
+        employees = Employee.query.filter_by(is_active=True).all()
+        
+        # Get all attendance records for the month
+        attendance_records = Attendance.query.filter(
+            Attendance.date >= first_day,
+            Attendance.date <= last_day
+        ).all()
+        
+        # Create attendance lookup dictionary
+        attendance_dict = {}
+        for record in attendance_records:
+            key = f"{record.employee_id}_{record.date.isoformat()}"
+            attendance_dict[key] = record.status
+        
+        # Generate all dates in the month
+        current_date = first_day
+        all_dates = []
+        while current_date <= last_day:
+            all_dates.append(current_date)
+            current_date += timedelta(days=1)
         
         # Create PDF in memory
         output = io.BytesIO()
@@ -780,33 +875,64 @@ def export_attendance_report_pdf():
             'CustomTitle',
             parent=styles['Heading1'],
             fontSize=16,
-            spaceAfter=30,
+            spaceAfter=20,
             alignment=1  # Center alignment
+        )
+        
+        normal_style = ParagraphStyle(
+            'CustomNormal',
+            parent=styles['Normal'],
+            fontSize=8,
+            leading=10
         )
         
         # Create content
         story = []
         
         # Title
-        if employee_id:
-            title = f"Attendance Report - {employees[0].name}"
-        else:
-            title = f"Attendance Overview - {date_obj.strftime('%B %d, %Y')}"
-        
+        title = f"Monthly Attendance Overview - {first_day.strftime('%B %Y')}"
         story.append(Paragraph(title, title_style))
         story.append(Spacer(1, 20))
         
-        # Create table data
-        table_data = [['Employee ID', 'Employee Name', 'Email', 'Status']]
+        # Summary statistics
+        total_employees = len(employees)
+        total_working_days = len([d for d in all_dates if d.weekday() < 5])  # Exclude weekends
+        
+        summary_text = f"<b>Report Summary:</b><br/>"
+        summary_text += f"Total Employees: {total_employees}<br/>"
+        summary_text += f"Total Working Days: {total_working_days}<br/>"
+        summary_text += f"Report Period: {first_day.strftime('%B %d')} - {last_day.strftime('%B %d, %Y')}<br/>"
+        
+        story.append(Paragraph(summary_text, normal_style))
+        story.append(Spacer(1, 20))
+        
+        # Create summary table for each employee
+        table_data = [['Employee', 'Present', 'Half Day', 'Absent', 'Leave', 'Overtime', 'Total Days', 'Attendance %']]
         
         for employee in employees:
-            status = attendance_dict.get(employee.id, 'Not Marked')
+            stats = {'present': 0, 'halfday': 0, 'absent': 0, 'leave': 0, 'overtime': 0}
+            
+            for date in all_dates:
+                if date.weekday() < 5:  # Only count working days
+                    key = f"{employee.id}_{date.isoformat()}"
+                    status = attendance_dict.get(key, '')
+                    if status in stats:
+                        stats[status] += 1
+            
+            total_marked = sum(stats.values())
+            attendance_percentage = (stats['present'] / total_working_days * 100) if total_working_days > 0 else 0
+            
             table_data.append([
-                str(employee.id),
                 employee.name,
-                employee.email,
-                status.replace('_', ' ').title()
+                str(stats['present']),
+                str(stats['halfday']),
+                str(stats['absent']),
+                str(stats['leave']),
+                str(stats['overtime']),
+                str(total_marked),
+                f"{attendance_percentage:.1f}%"
             ])
+        
         
         # Create table
         table = Table(table_data)
@@ -815,19 +941,52 @@ def export_attendance_report_pdf():
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
             ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
             ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('FONTSIZE', (0, 1), (-1, -1), 10),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
         ]))
         
         story.append(table)
+        story.append(Spacer(1, 20))
+        
+        # Add legend
+        legend_text = "<b>Status Legend:</b><br/>"
+        legend_text += "Present: Full working day<br/>"
+        legend_text += "Half Day: Partial working day<br/>"
+        legend_text += "Absent: Did not attend<br/>"
+        legend_text += "Leave: On approved leave<br/>"
+        legend_text += "Overtime: Worked extra hours<br/>"
+        
+        story.append(Paragraph(legend_text, normal_style))
         
         # Build PDF
         doc.build(story)
         output.seek(0)
+        
+        # Create filename
+        filename = f"attendance_overview_{first_day.strftime('%Y%m')}.pdf"
+        
+        # Save file to database (optional)
+        try:
+            file_id = save_file_to_db(
+                file_data=output.getvalue(),
+                filename=filename,
+                file_type='pdf',
+                description=f'Monthly attendance overview PDF for {first_day.strftime("%B %Y")}',
+                related_table='attendance',
+                related_id=None
+            )
+            
+            # Log the export action
+            log_audit_action(get_jwt_identity(), 'EXPORT', 'attendance', None, 
+                           None, {'filename': filename, 'file_id': file_id}, 
+                           f'Monthly PDF report exported for {first_day.strftime("%B %Y")}')
+        except Exception as e:
+            print(f"Error saving PDF to database: {e}")
         
         return send_file(
             output,

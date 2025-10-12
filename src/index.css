@@ -6,6 +6,12 @@
   body {
     @apply bg-gray-50 text-gray-900;
     font-feature-settings: "rlig" 1, "calt" 1;
+    margin: 0;
+    padding: 0;
+  }
+  
+  * {
+    box-sizing: border-box;
   }
 }
 
@@ -38,5 +44,51 @@
   
   .shadow-glow {
     box-shadow: 0 0 20px rgba(59, 130, 246, 0.15);
+  }
+  
+  /* Custom scrollbar for attendance table */
+  .attendance-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f8fafc;
+  }
+  
+  .attendance-scroll::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+  
+  .attendance-scroll::-webkit-scrollbar-track {
+    background: #f8fafc;
+    border-radius: 4px;
+  }
+  
+  .attendance-scroll::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+  }
+  
+  .attendance-scroll::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+  
+  /* Smooth scroll behavior */
+  .smooth-scroll {
+    scroll-behavior: smooth;
+  }
+  
+  /* Full height container utilities */
+  .full-height-container {
+    height: calc(100vh - 64px); /* Subtract header height */
+  }
+  
+  /* Prevent body scroll when using fixed layouts */
+  .no-page-scroll {
+    overflow: hidden;
+  }
+  
+  /* Ensure flex children take full height */
+  .flex-full-height {
+    height: 100%;
+    min-height: 0;
   }
 }

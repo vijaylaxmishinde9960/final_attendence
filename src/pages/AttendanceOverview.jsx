@@ -19,11 +19,11 @@ import toast from 'react-hot-toast'
 
 const attendanceStatuses = {
   present: { 
-    label: 'Full Day', 
+    label: 'Present', 
     short: '✅', 
     color: 'bg-green-500'
   },
-  halfday: { 
+  half_day: { 
     label: 'Half Day', 
     short: '🌗', 
     color: 'bg-yellow-500'
@@ -96,34 +96,62 @@ export default function AttendanceOverview() {
       const startDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1)
         .toISOString().split('T')[0]
       
-      // For now, just set empty attendance data
-      setAttendanceData({})
+      // Use the new attendance overview endpoint for better performance
+      const response = await axios.get(`/admin/attendance/overview?date=${startDate}`)
+      
+      if (response.data && response.data.attendance_data) {
+        setAttendanceData(response.data.attendance_data)
+        
+        // Update employees list if needed
+        if (response.data.employees && response.data.employees.length > 0) {
+          setEmployees(response.data.employees)
+        }
+      } else {
+        setAttendanceData({})
+      }
     } catch (error) {
       console.error('Failed to fetch attendance data:', error)
       setAttendanceData({})
+      
+      // Fall back to fetching employees separately if overview fails
+      if (employees.length === 0) {
+        fetchEmployees()
+      }
     }
   }
 
   const markAttendance = async (employeeId, date, status) => {
     try {
-      // Update local state immediately
+      const dateString = date.toISOString().split('T')[0]
+      
+      // Call backend API to mark attendance
+      await axios.post('/admin/attendance', {
+        employee_id: employeeId,
+        date: dateString,
+        status: status
+      })
+      
+      // Update local state after successful API call
       setAttendanceData(prev => ({
         ...prev,
         [employeeId]: {
           ...prev[employeeId],
-          [date.toISOString().split('T')[0]]: status
+          [dateString]: status
         }
       }))
       
       const employee = employees.find(emp => emp.id === employeeId)
-      toast.success(`${attendanceStatuses[status].label} marked for ${employee?.name}`)
+      toast.success(`${attendanceStatuses[status].label} marked for ${employee?.name} on ${date.toLocaleDateString()}`)
       
       setShowStatusDropdown(false)
       setSelectedCell(null)
       
     } catch (error) {
       console.error('Failed to mark attendance:', error)
-      toast.error('Failed to mark attendance')
+      toast.error('Failed to mark attendance. Please try again.')
+      
+      // Revert local state change if API call failed
+      fetchAttendanceData()
     }
   }
 
@@ -139,6 +167,13 @@ export default function AttendanceOverview() {
 
   const handleCellClick = (employeeId, date, event) => {
     event.stopPropagation()
+    
+    // Don't allow marking on weekends
+    const isWeekend = date.getDay() === 0 || date.getDay() === 6
+    if (isWeekend) {
+      return
+    }
+    
     setSelectedCell({ employeeId, date })
     setShowStatusDropdown(true)
   }
@@ -153,7 +188,7 @@ export default function AttendanceOverview() {
     
     const stats = {
       present: 0,
-      halfday: 0,
+      half_day: 0,
       absent: 0,
       leave: 0,
       overtime: 0
@@ -341,175 +376,271 @@ export default function AttendanceOverview() {
       </div>
 
       {/* Attendance Table */}
-      <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            {/* Header */}
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-gray-50 z-10 min-w-[200px]">
-                  Employee
-                </th>
-                <th className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
-                  Stats
-                </th>
-                {calendarDays.slice(0, 10).map(day => (
-                  <th key={day.toISOString()} className="px-1 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[40px]">
-                    {day.getDate()}
+      <div className="card" style={{ maxWidth: '100vw', overflowX: 'visible' }}>
+        <div className="mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">Monthly Attendance Grid</h3>
+              <p className="text-sm text-gray-600">Click on any date to mark attendance. Weekends are disabled.</p>
+            </div>
+            <div className="flex items-center space-x-2 text-xs text-gray-500">
+              <div className="flex items-center space-x-1">
+                <div className="w-3 h-3 rounded bg-green-500"></div>
+                <span>Present</span>
+              </div>
+              <div className="flex items-center space-x-1">
+                <div className="w-3 h-3 rounded bg-yellow-500"></div>
+                <span>Half Day</span>
+              </div>
+              <div className="flex items-center space-x-1">
+                <div className="w-3 h-3 rounded bg-red-500"></div>
+                <span>Absent</span>
+              </div>
+              <div className="flex items-center space-x-1">
+                <div className="w-3 h-3 rounded bg-blue-500"></div>
+                <span>Leave</span>
+              </div>
+              <div className="flex items-center space-x-1">
+                <div className="w-3 h-3 rounded bg-purple-500"></div>
+                <span>Overtime</span>
+              </div>
+            </div>
+          </div>
+          
+          {/* Scroll hint */}
+          <div className="mt-2 flex items-center space-x-2 text-xs text-gray-400">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+            </svg>
+            <span>Scroll horizontally within the table to view dates beyond the 16th</span>
+          </div>
+        </div>
+        
+        {/* Horizontally Scrollable Table Container - Shows 16 dates initially */}
+        <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+          <div 
+            className="overflow-x-auto overflow-y-auto attendance-scroll smooth-scroll" 
+            style={{ 
+              maxHeight: '600px', 
+              width: `min(${200 + 120 + (16 * 60)}px, calc(100vw - 96px))`, // Shows 16 dates or available width
+              backgroundColor: 'white'
+            }}
+          >
+            <table className="border-collapse" style={{ width: 'max-content', tableLayout: 'fixed' }}>
+              {/* Header */}
+              <thead className="bg-gray-50 sticky top-0 z-20">
+                <tr>
+                  <th 
+                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-gray-50 z-30 border-r border-gray-200" 
+                    style={{ width: '200px', minWidth: '200px', maxWidth: '200px', boxShadow: '2px 0 4px rgba(0,0,0,0.1)' }}
+                  >
+                    Employee
                   </th>
-                ))}
-              </tr>
-            </thead>
-            
-            {/* Body */}
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredEmployees.map((employee) => {
-                const stats = getEmployeeStats(employee.id)
-                
-                return (
-                  <tr key={employee.id} className="hover:bg-gray-50">
-                    {/* Employee Info */}
-                    <td className="px-4 py-4 sticky left-0 bg-white border-r border-gray-200 z-10">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-8 h-8 bg-gradient-to-r from-primary-500 to-primary-600 rounded-full flex items-center justify-center flex-shrink-0">
-                          <Users className="w-4 h-4 text-white" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-gray-900 truncate">{employee.name}</p>
-                          <p className="text-xs text-gray-500 truncate">{employee.email}</p>
-                          {employee.department && (
-                            <p className="text-xs text-gray-400 truncate">{employee.department}</p>
-                          )}
-                        </div>
+                  <th 
+                    className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-[200px] bg-gray-50 z-30 border-r border-gray-200" 
+                    style={{ width: '120px', minWidth: '120px', maxWidth: '120px', boxShadow: '2px 0 4px rgba(0,0,0,0.1)' }}
+                  >
+                    Stats
+                  </th>
+                  {calendarDays.map(day => (
+                    <th 
+                      key={day.toISOString()} 
+                      className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-r border-gray-100"
+                      style={{ width: '60px', minWidth: '60px', maxWidth: '60px' }}
+                    >
+                      <div className="flex flex-col items-center">
+                        <span className="font-semibold text-gray-700">{day.getDate()}</span>
+                        <span className="text-[9px] text-gray-400 mt-0.5">
+                          {day.toLocaleDateString('en-US', { weekday: 'short' })}
+                        </span>
                       </div>
-                    </td>
-                    
-                    {/* Stats */}
-                    <td className="px-2 py-4">
-                      <div className="grid grid-cols-2 gap-1 text-xs">
-                        <div className="flex items-center space-x-1">
-                          <CheckCircle className="w-3 h-3 text-green-500" />
-                          <span>{stats.present}</span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              
+              {/* Body */}
+              <tbody className="bg-white divide-y divide-gray-100">
+                {filteredEmployees.map((employee, rowIndex) => {
+                  const stats = getEmployeeStats(employee.id)
+                  
+                  return (
+                    <tr key={employee.id} className={`hover:bg-gray-50 transition-colors duration-150 ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
+                      {/* Employee Info - Sticky Left */}
+                      <td 
+                        className="px-4 py-3 sticky left-0 border-r border-gray-200 z-20" 
+                        style={{ 
+                          width: '200px', 
+                          minWidth: '200px', 
+                          maxWidth: '200px',
+                          backgroundColor: rowIndex % 2 === 0 ? '#ffffff' : '#f9fafb',
+                          boxShadow: '2px 0 4px rgba(0,0,0,0.1)'
+                        }}
+                      >
+                        <div className="flex items-center space-x-3">
+                          <div className="w-8 h-8 bg-gradient-to-r from-primary-500 to-primary-600 rounded-full flex items-center justify-center flex-shrink-0">
+                            <Users className="w-4 h-4 text-white" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-gray-900 truncate">{employee.name}</p>
+                            <p className="text-xs text-gray-500 truncate">{employee.email}</p>
+                            {employee.department && (
+                              <p className="text-xs text-gray-400 truncate">{employee.department}</p>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center space-x-1">
-                          <Clock className="w-3 h-3 text-yellow-500" />
-                          <span>{stats.halfday}</span>
-                        </div>
-                        <div className="flex items-center space-x-1">
-                          <XCircle className="w-3 h-3 text-red-500" />
-                          <span>{stats.absent}</span>
-                        </div>
-                        <div className="flex items-center space-x-1">
-                          <Leaf className="w-3 h-3 text-blue-500" />
-                          <span>{stats.leave}</span>
-                        </div>
-                        <div className="flex items-center space-x-1">
-                          <Zap className="w-3 h-3 text-purple-500" />
-                          <span>{stats.overtime}</span>
-                        </div>
-                      </div>
-                    </td>
-                    
-                    {/* Calendar Days - Show only first 10 days for now */}
-                    {calendarDays.slice(0, 10).map(day => {
-                      const status = getAttendanceStatus(employee.id, day)
-                      const isSelected = selectedCell?.employeeId === employee.id && 
-                                       selectedCell?.date.toDateString() === day.toDateString()
-                      const isToday = day.toDateString() === new Date().toDateString()
+                      </td>
                       
-                      return (
-                        <td key={day.toISOString()} className="px-1 py-2 text-center relative">
-                          <button
-                            onClick={(e) => handleCellClick(employee.id, day, e)}
-                            className={`
-                              w-8 h-8 rounded-full text-xs font-medium transition-all duration-200 hover:scale-110
-                              ${status 
-                                ? `${attendanceStatuses[status].color} text-white` 
-                                : isToday 
-                                  ? 'bg-primary-100 text-primary-700 border-2 border-primary-300' 
-                                  : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-                              }
-                              ${isSelected ? 'ring-2 ring-primary-500' : ''}
-                            `}
-                            title={status ? attendanceStatuses[status].label : isToday ? 'Today - Click to mark attendance' : 'Click to mark attendance'}
+                      {/* Stats - Sticky Left */}
+                      <td 
+                        className="px-2 py-3 sticky left-[200px] border-r border-gray-200 z-20" 
+                        style={{ 
+                          width: '120px', 
+                          minWidth: '120px', 
+                          maxWidth: '120px',
+                          backgroundColor: rowIndex % 2 === 0 ? '#ffffff' : '#f9fafb',
+                          boxShadow: '2px 0 4px rgba(0,0,0,0.1)'
+                        }}
+                      >
+                        <div className="grid grid-cols-2 gap-1 text-xs">
+                          <div className="flex items-center space-x-1" title="Present Days">
+                            <CheckCircle className="w-3 h-3 text-green-500 flex-shrink-0" />
+                            <span className="font-medium">{stats.present}</span>
+                          </div>
+                          <div className="flex items-center space-x-1" title="Half Days">
+                            <Clock className="w-3 h-3 text-yellow-500 flex-shrink-0" />
+                            <span className="font-medium">{stats.half_day}</span>
+                          </div>
+                          <div className="flex items-center space-x-1" title="Absent Days">
+                            <XCircle className="w-3 h-3 text-red-500 flex-shrink-0" />
+                            <span className="font-medium">{stats.absent}</span>
+                          </div>
+                          <div className="flex items-center space-x-1" title="Leave Days">
+                            <Leaf className="w-3 h-3 text-blue-500 flex-shrink-0" />
+                            <span className="font-medium">{stats.leave}</span>
+                          </div>
+                          <div className="flex items-center space-x-1 col-span-2" title="Overtime Days">
+                            <Zap className="w-3 h-3 text-purple-500 flex-shrink-0" />
+                            <span className="font-medium">{stats.overtime}</span>
+                          </div>
+                        </div>
+                      </td>
+                      
+                      {/* Calendar Days - Scrollable horizontally */}
+                      {calendarDays.map(day => {
+                        const status = getAttendanceStatus(employee.id, day)
+                        const isSelected = selectedCell?.employeeId === employee.id && 
+                                         selectedCell?.date.toDateString() === day.toDateString()
+                        const isToday = day.toDateString() === new Date().toDateString()
+                        const isWeekend = day.getDay() === 0 || day.getDay() === 6
+                        
+                        return (
+                          <td 
+                            key={day.toISOString()} 
+                            className={`px-2 py-3 text-center border-r border-gray-100 ${isWeekend ? 'bg-gray-50' : ''}`}
+                            style={{ width: '60px', minWidth: '60px', maxWidth: '60px' }}
                           >
-                            {status ? attendanceStatuses[status].short : day.getDate()}
-                          </button>
-                        </td>
-                      )
-                    })}
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                            <button
+                              onClick={(e) => handleCellClick(employee.id, day, e)}
+                              className={`
+                                w-9 h-9 rounded-lg text-xs font-medium transition-all duration-200 hover:scale-105 hover:shadow-md relative
+                                ${status 
+                                  ? `${attendanceStatuses[status].color} text-white shadow-sm` 
+                                  : isToday 
+                                    ? 'bg-primary-100 text-primary-700 border-2 border-primary-400 shadow-sm' 
+                                    : isWeekend
+                                      ? 'bg-gray-200 text-gray-500 hover:bg-gray-300'
+                                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200'
+                                }
+                                ${isSelected ? 'ring-2 ring-primary-500 ring-offset-1' : ''}
+                                ${isWeekend ? 'cursor-default' : 'cursor-pointer'}
+                              `}
+                              title={
+                                isWeekend 
+                                  ? `${day.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })} - Weekend`
+                                  : status 
+                                    ? `${attendanceStatuses[status].label} - ${day.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+                                    : isToday 
+                                      ? `Today - ${day.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} - Click to mark attendance`
+                                      : `${day.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} - Click to mark attendance`
+                              }
+                              disabled={isWeekend}
+                            >
+                              {status ? (
+                                <span className="text-lg">{attendanceStatuses[status].short}</span>
+                              ) : (
+                                <span className={`${isToday ? 'font-bold' : ''}`}>{day.getDate()}</span>
+                              )}
+                              {isToday && !status && (
+                                <div className="absolute -top-1 -right-1 w-2 h-2 bg-primary-500 rounded-full"></div>
+                              )}
+                            </button>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      {/* Status Dropdown */}
-      {showStatusDropdown && selectedCell && (
-        <div className="fixed inset-0 bg-black bg-opacity-25 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-sm w-full mx-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">
-              Mark Attendance
-            </h3>
-            <p className="text-sm text-gray-600 mb-4">
-              {employees.find(emp => emp.id === selectedCell.employeeId)?.name} - {selectedCell.date.toLocaleDateString()}
-            </p>
-            
-            <div className="space-y-2">
-              {Object.entries(attendanceStatuses).map(([status, config]) => (
-                <button
-                  key={status}
-                  onClick={() => markAttendance(selectedCell.employeeId, selectedCell.date, status)}
-                  className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors duration-200 bg-gray-50 hover:bg-gray-100"
-                >
-                  <div className={`w-6 h-6 ${config.color} rounded-full flex items-center justify-center`}>
-                    <span className="text-xs text-white">{config.short}</span>
-                  </div>
-                  <span className="font-medium text-gray-900">{config.label}</span>
-                </button>
-              ))}
+      {/* Quick Stats */}
+      <div className="card">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Monthly Summary</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
+                <CheckCircle className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-green-800">Total Present</p>
+                <p className="text-lg font-bold text-green-900">{filteredEmployees.reduce((sum, emp) => sum + getEmployeeStats(emp.id).present, 0)}</p>
+              </div>
             </div>
-            
-            <div className="mt-6 flex justify-end">
-              <button
-                onClick={() => {
-                  setShowStatusDropdown(false)
-                  setSelectedCell(null)
-                }}
-                className="btn-secondary"
-              >
-                Cancel
-              </button>
+          </div>
+          
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 bg-red-500 rounded-full flex items-center justify-center">
+                <XCircle className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-red-800">Total Absent</p>
+                <p className="text-lg font-bold text-red-900">{filteredEmployees.reduce((sum, emp) => sum + getEmployeeStats(emp.id).absent, 0)}</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 bg-yellow-500 rounded-full flex items-center justify-center">
+                <Clock className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-yellow-800">Half Days</p>
+                <p className="text-lg font-bold text-yellow-900">{filteredEmployees.reduce((sum, emp) => sum + getEmployeeStats(emp.id).half_day, 0)}</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
+                <Leaf className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-blue-800">On Leave</p>
+                <p className="text-lg font-bold text-blue-900">{filteredEmployees.reduce((sum, emp) => sum + getEmployeeStats(emp.id).leave, 0)}</p>
+              </div>
             </div>
           </div>
         </div>
-      )}
-
-      {/* Legend */}
-      <div className="card">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Attendance Legend</h3>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          {Object.entries(attendanceStatuses).map(([status, config]) => (
-            <div key={status} className="flex items-center space-x-2">
-              <div className={`w-4 h-4 ${config.color} rounded-full flex items-center justify-center`}>
-                <span className="text-xs text-white">{config.short}</span>
-              </div>
-              <span className="text-sm text-gray-600">{config.label}</span>
-            </div>
-          ))}
-        </div>
       </div>
 
-      {/* Debug Info */}
-      <div className="card bg-blue-50">
-        <h3 className="text-lg font-semibold text-blue-900 mb-2">Debug Information</h3>
-        <p className="text-sm text-blue-800">Employees loaded: {employees.length}</p>
-        <p className="text-sm text-blue-800">Current month: {currentMonth.toLocaleDateString()}</p>
-        <p className="text-sm text-blue-800">Search term: "{searchTerm}"</p>
-        <p className="text-sm text-blue-800">Department filter: "{departmentFilter}"</p>
-      </div>
     </div>
   )
 }

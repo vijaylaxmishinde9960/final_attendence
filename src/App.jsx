@@ -30,15 +30,16 @@ function AppContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      
-      <div className="flex-1 flex flex-col lg:ml-0">
-        <Header onMenuClick={() => setSidebarOpen(true)} />
+    <div className="min-h-screen bg-gray-50">
+      <div className="flex min-h-screen">
+        <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
         
-        <main className="flex-1 overflow-auto">
-          <div className="p-4 lg:p-6 max-w-7xl mx-auto w-full">
-            <Routes>
+        <div className="flex-1 flex flex-col lg:ml-16 min-h-screen">
+          <Header onMenuClick={() => setSidebarOpen(true)} />
+          
+          <main className="flex-1 bg-gray-50 p-6">
+            <div>
+              <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/employees" element={<Employees />} />
@@ -47,12 +48,13 @@ function AppContent() {
               <Route path="/attendance" element={<Attendance />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/leave-overtime" element={<LeaveOvertime />} />
-            </Routes>
-          </div>
-        </main>
+              </Routes>
+            </div>
+          </main>
+        </div>
       </div>
       
-      <Toaster 
+      <Toaster
         position="top-right"
         toastOptions={{
           duration: 4000,

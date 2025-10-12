@@ -10,24 +10,26 @@ This is a comprehensive Attendance Management System with a **hybrid architectur
 2. **Modern React Frontend** - SPA with Vite, Tailwind CSS, and modern UI components  
 3. **Legacy HTML Frontend** - Traditional server-rendered interface
 
-The system uses MySQL for data persistence and supports features like employee management, attendance tracking, reporting, and Excel/PDF exports.
+The system uses MySQL for data persistence (managed via MySQL Workbench) and supports features like employee management, department management, attendance tracking, leave management, overtime tracking, reporting, and Excel/PDF exports.
 
 ## Architecture
 
 ### Backend (Flask)
 - **Main Application**: `app.py` - Flask REST API with JWT authentication
-- **Database Models**: Admin, Employee, Attendance (SQLAlchemy ORM)
+- **Database Models**: Admin, Employee, Department, Attendance, Leave, AuditLog, FileStorage (SQLAlchemy ORM)
 - **Authentication**: JWT tokens with 24-hour expiration
 - **Database**: MySQL with PyMySQL connector
-- **Key Features**: CRUD operations, bulk attendance marking, report generation, Excel/PDF export
+- **Key Features**: CRUD operations, bulk attendance marking, department management, leave tracking, overtime management, audit logging, file storage, report generation, Excel/PDF export
 
 ### Frontend Architecture
 **React SPA** (`src/`):
 - **Entry Point**: `src/main.jsx` → `src/App.jsx`
-- **Routing**: React Router with protected routes
-- **State Management**: Context API for authentication
-- **UI Framework**: Tailwind CSS with custom components
-- **Key Pages**: Dashboard, Employees, AttendanceOverview, Reports, LeaveOvertime
+- **Routing**: React Router with protected routes and navigation guards
+- **State Management**: Context API for authentication (`AuthContext`) and attendance (`AttendanceContext`)
+- **UI Framework**: Tailwind CSS with custom components and utility classes
+- **Key Pages**: Dashboard, Employees, Departments, AttendanceOverview, Attendance, Reports, LeaveOvertime, Login
+- **Components**: Header, Sidebar, AttendanceCell, StatusDropdown (reusable UI components)
+- **Features**: Real-time updates, toast notifications, responsive design, dark mode support
 
 **Legacy Interface** (`templates/`, `static/`):
 - **Template**: `templates/index.html` (Jinja2)
@@ -35,9 +37,13 @@ The system uses MySQL for data persistence and supports features like employee m
 - **Styles**: `static/style.css`
 
 ### Database Schema
-- **Admin**: id, username, password_hash, created_at
-- **Employee**: id, name, email, created_at
-- **Attendance**: id, employee_id, date, status, marked_at
+- **Admin**: id, username, password_hash, email, full_name, is_active, last_login, created_at, updated_at
+- **Department**: id, name, description, manager_id, is_active, created_at, updated_at
+- **Employee**: id, employee_id, name, email, phone, address, department_id, position, hire_date, salary, is_active, created_at, updated_at
+- **Attendance**: id, employee_id, date, status (present/absent/half_day/leave/overtime), check_in_time, check_out_time, total_hours, overtime_hours, notes, marked_by, created_at, updated_at
+- **Leave**: id, employee_id, leave_type, start_date, end_date, days_count, reason, status, approved_by, approved_at, created_at, updated_at
+- **AuditLog**: Tracks all system changes with user_id, action, table_name, record_id, old_values, new_values, ip_address, user_agent
+- **FileStorage**: Manages exported files and documents
 
 ## Development Commands
 
@@ -65,9 +71,24 @@ python setup_database.py
 
 # Add sample data for testing
 python add_sample_data.py
+python add_sample_departments.py
+python add_sample_employees.py
 
-# Fix database issues if needed
+# Database management and fixes
 python fix_database.py
+python migrate_departments.py
+python init_database.py
+
+# Employee and department assignment
+python assign_department_managers.py
+python assign_remaining_employees.py
+python check_employee_departments.py
+
+# Database verification and testing
+python show_department_counts.py
+python test_departments.py
+python test_employee_department_integration.py
+python update_mysql_schema.py
 
 # Run Flask application
 python app.py
@@ -110,10 +131,25 @@ python test_login.py
 - `PUT /admin/employees/<id>` - Update employee
 - `DELETE /admin/employees/<id>` - Delete employee
 
+### Department Management
+- `GET /admin/departments` - List all departments
+- `POST /admin/departments` - Add new department
+- `PUT /admin/departments/<id>` - Update department
+- `DELETE /admin/departments/<id>` - Delete department
+
 ### Attendance Management
 - `POST /admin/attendance` - Mark individual attendance  
 - `POST /admin/attendance/bulk` - Bulk attendance marking
 - `GET /admin/attendance/report` - Generate reports
+- `GET /admin/attendance/overview` - Monthly attendance overview
+- `GET /admin/attendance/export/excel` - Export Excel report
+- `GET /admin/attendance/export/pdf` - Export PDF report
+
+### Leave Management
+- `GET /admin/leaves` - List leave requests
+- `POST /admin/leaves` - Create leave request
+- `PUT /admin/leaves/<id>/approve` - Approve leave request
+- `PUT /admin/leaves/<id>/reject` - Reject leave request
 
 ## Development Workflow
 
@@ -157,8 +193,28 @@ React dev server proxies `/admin` requests to Flask backend (port 5000) via Vite
 
 ### Database Dependencies
 - Requires MySQL server running locally
+- **Database Management Tool**: MySQL Workbench (preferred for database administration)
 - Run `setup_database.py` on first setup to create schema and admin user
 - Database connection credentials are hardcoded in `app.py` (change for production)
+- **Database Name**: `attendance_system`
+- **Current Connection**: `mysql+pymysql://root:1109@localhost:3306/attendance_system`
+
+### Database Management with MySQL Workbench
+```bash
+# Connect to MySQL Workbench with:
+# Host: 127.0.0.1 (localhost)
+# Port: 3306
+# Username: root
+# Password: 1109
+# Database: attendance_system
+
+# Useful MySQL Workbench operations:
+# - View/edit table schemas
+# - Run direct SQL queries for debugging
+# - Monitor database performance
+# - Export/import database backups
+# - Manage user permissions
+```
 
 ### Windows-Specific Features
 - `start_servers.bat` automatically starts both Flask and React servers
@@ -177,3 +233,66 @@ React dev server proxies `/admin` requests to Flask backend (port 5000) via Vite
 - **Framer Motion** for animations
 - **React Hot Toast** for notifications
 - **Recharts** for data visualization
+- **Axios** for HTTP requests
+- **Lucide React** for modern icons
+- **Date-fns** for date manipulation
+
+## Development Patterns
+
+### Component Architecture
+- **Pages**: Route-level components in `src/pages/`
+- **Components**: Reusable UI components in `src/components/`
+- **Contexts**: Global state management in `src/contexts/`
+- **Hooks**: Custom React hooks for shared logic
+
+### State Management Strategy
+- **AuthContext**: Handles user authentication and JWT token management
+- **AttendanceContext**: Manages attendance data and UI state
+- **Local State**: Component-level state for forms and UI interactions
+- **Optimistic Updates**: UI updates immediately before API confirmation
+
+### API Integration Patterns
+- **Centralized Axios Config**: Base URL and interceptors for JWT tokens
+- **Error Handling**: Consistent error messages via toast notifications
+- **Loading States**: Proper loading indicators for async operations
+- **Retry Logic**: Automatic retries for failed network requests
+
+## Troubleshooting Common Issues
+
+### Attendance Not Saving
+```bash
+# Check if Flask backend is running
+curl http://localhost:5000/admin/employees
+
+# Verify MySQL connection
+python -c "from app import db; print('DB connected')" 
+
+# Check browser console for JavaScript errors
+# Verify JWT token in localStorage
+```
+
+### Database Connection Issues
+```bash
+# Test database connectivity
+python test_system.py
+
+# Reset database if corrupted
+python fix_database.py
+
+# Check MySQL service status
+# Verify credentials in MySQL Workbench
+```
+
+### React Development Issues
+```bash
+# Clear node modules and reinstall
+rmdir /S node_modules
+npm install
+
+# Clear Vite cache
+npm run dev -- --force
+
+# Check for port conflicts
+netstat -ano | findstr :3000
+netstat -ano | findstr :5000
+```
