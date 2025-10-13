@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, date
 from flask_cors import CORS
 from sqlalchemy import Numeric, Text
 import os
+from urllib.parse import quote_plus
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from flask import send_file
@@ -21,9 +22,31 @@ app = Flask(__name__)
 # Enable CORS for React frontend
 CORS(app, origins=['http://localhost:3000'])
 
+# Database URI builder with env-based configuration and safe fallback
+
+def build_db_uri():
+    # Highest priority: full DATABASE_URL (e.g., mysql+pymysql://user:pass@host:3306/db)
+    db_url = os.getenv('DATABASE_URL')
+    if db_url:
+        return db_url
+
+    # Next: compose from MYSQL_* variables
+    mysql_user = os.getenv('MYSQL_USER')
+    mysql_password = os.getenv('MYSQL_PASSWORD')
+    mysql_host = os.getenv('MYSQL_HOST', 'localhost')
+    mysql_port = os.getenv('MYSQL_PORT', '3306')
+    mysql_db = os.getenv('MYSQL_DB')
+
+    if mysql_user and mysql_password and mysql_db:
+        return f"mysql+pymysql://{mysql_user}:{quote_plus(mysql_password)}@{mysql_host}:{mysql_port}/{mysql_db}"
+
+    # Fallback: local SQLite DB placed next to this file
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.getenv('SQLITE_URL', f"sqlite:///{os.path.join(project_dir, 'attendance.db')}")
+
 # Configuration
 app.config['SECRET_KEY'] = 'your-secret-key-change-this-in-production'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:1109@localhost:3306/attendance_system'
+app.config['SQLALCHEMY_DATABASE_URI'] = build_db_uri()
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = 'jwt-secret-string-change-this-in-production'
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
@@ -31,6 +54,12 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_pre_ping': True,
     'pool_recycle': 300,
 }
+
+# Small hint in logs about which backend is in use (no secrets printed)
+try:
+    print(f"Using database backend: {app.config['SQLALCHEMY_DATABASE_URI'].split('://')[0]}")
+except Exception:
+    pass
 
 # Initialize extensions
 db = SQLAlchemy(app)

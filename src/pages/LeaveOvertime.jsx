@@ -69,7 +69,7 @@ export default function LeaveOvertime() {
       setLoading(true)
       
       // Fetch employees
-      const employeesResponse = await axios.get('/api/admin/employees')
+      const employeesResponse = await axios.get('/admin/employees')
       setEmployees(employeesResponse.data)
 
       // Mock data for leave and overtime requests

@@ -60,11 +60,9 @@ export default function Reports() {
       const startDate = startOfMonth(selectedMonth).toISOString().split('T')[0]
       const endDate = endOfMonth(selectedMonth).toISOString().split('T')[0]
       
-      // Fetch attendance data for the selected month
-      const response = await axios.get(`/admin/attendance/employee/${selectedEmployee.id}?start_date=${startDate}&end_date=${endDate}`)
-      
-      // Process the data to create report
-      const attendanceData = response.data
+      // Fetch monthly overview and extract selected employee's attendance
+      const overviewResponse = await axios.get(`/admin/attendance/overview?date=${startDate}`)
+      const attendanceData = (overviewResponse.data?.attendance_data || {})[selectedEmployee.id] || {}
       const days = eachDayOfInterval({
         start: startOfMonth(selectedMonth),
         end: endOfMonth(selectedMonth)
@@ -78,7 +76,7 @@ export default function Reports() {
         attendance: {
           present: 0,
           absent: 0,
-          halfday: 0,
+          half_day: 0,
           leave: 0,
           overtime: 0
         },
@@ -100,7 +98,7 @@ export default function Reports() {
           date: format(day, 'MMM dd'),
           present: status === 'present' ? 1 : 0,
           absent: status === 'absent' ? 1 : 0,
-          halfday: status === 'halfday' ? 1 : 0,
+          half_day: status === 'half_day' ? 1 : 0,
           leave: status === 'leave' ? 1 : 0,
           overtime: status === 'overtime' ? 1 : 0
         })
@@ -117,7 +115,7 @@ export default function Reports() {
           week: `Week ${week + 1}`,
           present: 0,
           absent: 0,
-          halfday: 0,
+          half_day: 0,
           leave: 0,
           overtime: 0
         }
@@ -197,15 +195,15 @@ export default function Reports() {
 
   const getAttendanceRate = () => {
     if (!reportData) return 0
-    const { present, halfday } = reportData.attendance
+    const { present, half_day } = reportData.attendance
     const totalWorkingDays = reportData.workingDays
-    return totalWorkingDays > 0 ? Math.round(((present + halfday * 0.5) / totalWorkingDays) * 100) : 0
+    return totalWorkingDays > 0 ? Math.round(((present + half_day * 0.5) / totalWorkingDays) * 100) : 0
   }
 
   const attendanceChartData = reportData ? [
     { name: 'Present', value: reportData.attendance.present, color: '#10b981' },
     { name: 'Absent', value: reportData.attendance.absent, color: '#ef4444' },
-    { name: 'Half Day', value: reportData.attendance.halfday, color: '#f59e0b' },
+    { name: 'Half Day', value: reportData.attendance.half_day, color: '#f59e0b' },
     { name: 'Leave', value: reportData.attendance.leave, color: '#3b82f6' },
     { name: 'Overtime', value: reportData.attendance.overtime, color: '#8b5cf6' }
   ].filter(item => item.value > 0) : []
@@ -309,7 +307,7 @@ export default function Reports() {
                     <YAxis />
                     <Tooltip />
                     <Bar dataKey="present" stackId="a" fill="#10b981" name="Present" />
-                    <Bar dataKey="halfday" stackId="a" fill="#f59e0b" name="Half Day" />
+                    <Bar dataKey="half_day" stackId="a" fill="#f59e0b" name="Half Day" />
                     <Bar dataKey="absent" stackId="a" fill="#ef4444" name="Absent" />
                     <Bar dataKey="leave" stackId="a" fill="#3b82f6" name="Leave" />
                     <Bar dataKey="overtime" stackId="a" fill="#8b5cf6" name="Overtime" />

@@ -16,7 +16,7 @@ import toast from 'react-hot-toast'
 const attendanceStatuses = {
   present: { label: 'Present', color: 'bg-green-500', icon: Check },
   absent: { label: 'Absent', color: 'bg-red-500', icon: X },
-  halfday: { label: 'Half Day', color: 'bg-yellow-500', icon: Clock },
+  half_day: { label: 'Half Day', color: 'bg-yellow-500', icon: Clock },
   leave: { label: 'Leave', color: 'bg-blue-500', icon: User },
   overtime: { label: 'Overtime', color: 'bg-purple-500', icon: Clock }
 }
@@ -178,7 +178,7 @@ export default function Attendance() {
     const stats = {
       present: 0,
       absent: 0,
-      halfday: 0,
+  half_day: 0,
       leave: 0,
       overtime: 0
     }

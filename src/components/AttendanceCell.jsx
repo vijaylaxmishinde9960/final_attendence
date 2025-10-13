@@ -10,7 +10,7 @@ const attendanceStatuses = {
     textColor: 'text-green-600',
     bgColor: 'bg-green-50'
   },
-  halfday: { 
+  half_day: { 
     label: 'Half Day', 
     short: '🌗', 
     color: 'bg-yellow-500', 

@@ -24,7 +24,7 @@ export function AttendanceProvider({ children }) {
       // Fetch attendance data for all employees for the month
       const promises = employees.map(async (employee) => {
         try {
-          const response = await axios.get(`/api/admin/attendance/report?date=${startDate}`)
+          const response = await axios.get(`/admin/attendance/report?date=${startDate}`)
           return { employeeId: employee.id, data: response.data }
         } catch (error) {
           return { employeeId: employee.id, data: null }
@@ -80,7 +80,7 @@ export function AttendanceProvider({ children }) {
 
   const markAttendance = async (employeeId, date, status) => {
     try {
-      await axios.post('/api/admin/attendance/bulk', {
+      await axios.post('/admin/attendance/bulk', {
         attendance_data: [{
           employee_id: employeeId,
           status: status
