@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, date
 from flask_cors import CORS
 from sqlalchemy import Numeric, Text
 import os
+from dotenv import load_dotenv
 from urllib.parse import quote_plus
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -21,6 +22,9 @@ app = Flask(__name__)
 
 # Enable CORS for React frontend
 CORS(app, origins=['http://localhost:3000'])
+
+# Load variables from .env if present
+load_dotenv()
 
 # Database URI builder with env-based configuration and safe fallback
 

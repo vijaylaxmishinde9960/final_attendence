@@ -10,7 +10,7 @@ export default function Departments() {
   const [searchTerm, setSearchTerm] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingDepartment, setEditingDepartment] = useState(null)
-  const [includeInactive, setIncludeInactive] = useState(false)
+  const [includeInactive, setIncludeInactive] = useState(true)
 
   // Form state
   const [formData, setFormData] = useState({
@@ -21,6 +21,10 @@ export default function Departments() {
   })
 
   useEffect(() => {
+    const cached = localStorage.getItem('departmentsCache')
+    if (cached) {
+      try { setDepartments(JSON.parse(cached)) } catch {}
+    }
     fetchDepartments()
     fetchEmployees()
   }, [])
@@ -42,9 +46,22 @@ export default function Departments() {
         }
       })
       setDepartments(response.data)
+      try { localStorage.setItem('departmentsCache', JSON.stringify(response.data)) } catch {}
     } catch (error) {
-      toast.error('Failed to fetch departments')
       console.error('Error fetching departments:', error)
+      // Fallback to cached departments if backend unavailable
+      const cached = localStorage.getItem('departmentsCache')
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached)
+          setDepartments(parsed)
+          toast('Showing cached departments (offline)', { icon: 'ℹ️' })
+        } catch {
+          toast.error('Failed to fetch departments')
+        }
+      } else {
+        toast.error('Failed to fetch departments')
+      }
     } finally {
       setLoading(false)
     }

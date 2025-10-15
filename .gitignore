@@ -1,2 +1,14 @@
 node_modules
 venv
+# Python caches
+__pycache__/
+*.pyc
+
+# Local env and secrets
+.env
+.env.*
+
+# Local databases / artifacts
+attendance.db
+*.sqlite
+*.sqlite3

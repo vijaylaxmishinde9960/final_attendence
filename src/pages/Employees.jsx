@@ -74,29 +74,48 @@ export default function Employees() {
     e.preventDefault()
     
     // Validate required fields
-    if (!formData.name || !formData.email) {
-      toast.error('Name and email are required fields')
+    if (!formData.employee_id?.trim() ||
+        !formData.name?.trim() ||
+        !formData.email?.trim() ||
+        !formData.phone?.trim() ||
+        !formData.address?.trim() ||
+        !formData.position?.trim() ||
+        !formData.hire_date?.trim() ||
+        formData.department_id === '' ||
+        formData.department_id === null ||
+        formData.salary === '' || formData.salary === null) {
+      toast.error('Please fill all fields before adding an employee')
+      return
+    }
+
+    // Extra basic checks
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      toast.error('Please enter a valid email address')
+      return
+    }
+    if (Number.isNaN(parseFloat(formData.salary)) || parseFloat(formData.salary) < 0) {
+      toast.error('Salary must be a valid non-negative number')
       return
     }
 
     try {
       const token = localStorage.getItem('authToken')
       const payload = {
-        employee_id: formData.employee_id || undefined,
-        name: formData.name,
-        email: formData.email,
-        phone: formData.phone || undefined,
-        address: formData.address || undefined,
-        department_id: formData.department_id || undefined,
-        position: formData.position || undefined,
-        hire_date: formData.hire_date || undefined,
-        salary: formData.salary ? parseFloat(formData.salary) : undefined
+        employee_id: formData.employee_id.trim(),
+        name: formData.name.trim(),
+        email: formData.email.trim(),
+        phone: formData.phone.trim(),
+        address: formData.address.trim(),
+        department_id: typeof formData.department_id === 'string' ? parseInt(formData.department_id) : formData.department_id,
+        position: formData.position.trim(),
+        hire_date: formData.hire_date,
+        salary: parseFloat(formData.salary)
       }
       
       // Remove undefined values
       Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key])
       
-      const response = await axios.post('/admin/employees', payload, {
+      await axios.post('/admin/employees', payload, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -391,13 +410,14 @@ export default function Employees() {
             <form onSubmit={handleAddEmployee} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Employee ID</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Employee ID *</label>
                   <input
                     type="text"
+                    required
                     className="input-field"
                     value={formData.employee_id}
                     onChange={(e) => setFormData({ ...formData, employee_id: e.target.value })}
-                    placeholder="Auto-generated if empty"
+                    placeholder="Enter Employee ID"
                   />
                 </div>
                 <div>
@@ -426,6 +446,7 @@ export default function Employees() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
                   <input
                     type="tel"
+                    required
                     className="input-field"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
@@ -435,6 +456,7 @@ export default function Employees() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Position</label>
                   <input
                     type="text"
+                    required
                     className="input-field"
                     value={formData.position}
                     onChange={(e) => setFormData({ ...formData, position: e.target.value })}
@@ -445,6 +467,7 @@ export default function Employees() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
                 <select
                   className="input-field"
+                  required
                   value={formData.department_id || ''}
                   onChange={(e) => setFormData({ ...formData, department_id: e.target.value ? parseInt(e.target.value) : '' })}
                 >
@@ -460,6 +483,7 @@ export default function Employees() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
                 <textarea
                   className="input-field resize-none"
+                  required
                   rows={2}
                   value={formData.address}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
@@ -471,6 +495,7 @@ export default function Employees() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Hire Date</label>
                   <input
                     type="date"
+                    required
                     className="input-field"
                     value={formData.hire_date}
                     onChange={(e) => setFormData({ ...formData, hire_date: e.target.value })}
@@ -482,6 +507,7 @@ export default function Employees() {
                     type="number"
                     step="0.01"
                     min="0"
+                    required
                     className="input-field"
                     value={formData.salary}
                     onChange={(e) => setFormData({ ...formData, salary: e.target.value })}

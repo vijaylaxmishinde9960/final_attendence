@@ -543,83 +543,155 @@ async function exportToExcel() {
             return;
         }
         
-        showMessage('Generating Excel report...', 'info');
-        
-        // Debug: Log the token
-        console.log('Auth token:', authToken);
-        console.log('Token length:', authToken ? authToken.length : 'null');
-        console.log('Token type:', typeof authToken);
-        console.log('Token starts with:', authToken ? authToken.substring(0, 20) + '...' : 'null');
-        
-        // Test token first
-        console.log('Testing token...');
-        const tokenValid = await testToken();
-        if (!tokenValid) {
-            showMessage('Token validation failed. Please login again.', 'error');
-            return;
-        }
-        
-        // Create download link
-        const url = `/admin/attendance/export?date=${selectedDate}`;
-        
-        // Add authorization header
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${authToken}`,
-                'Content-Type': 'application/json'
+        // If there are unsaved attendance changes in the UI, save them first for the selected date
+        const pendingAttendance = [];
+        document.querySelectorAll('.employee-card').forEach(card => {
+            const employeeId = parseInt(card.dataset.employeeId);
+            const status = card.dataset.attendanceStatus; // set when user clicks Present/Absent
+            if (status) {
+                pendingAttendance.push({ employee_id: employeeId, status });
             }
         });
         
-        if (response.ok) {
-            const blob = await response.blob();
-            console.log('Response blob type:', blob.type);
-            console.log('Response blob size:', blob.size);
-            
-            // Check if it's actually an Excel file
-            if (blob.type.includes('spreadsheet') || blob.type.includes('excel') || blob.type.includes('openxml') || blob.type === 'application/octet-stream') {
-                const downloadUrl = window.URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = downloadUrl;
-                link.download = `attendance_report_${selectedDate}.xlsx`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                window.URL.revokeObjectURL(downloadUrl);
-                
-                showMessage('Excel report downloaded successfully!', 'success');
-            } else {
-                // If it's not an Excel file, it might be an error response
-                const text = await blob.text();
-                console.log('Response text:', text);
-                try {
-                    const errorData = JSON.parse(text);
-                    showMessage(errorData.message || errorData.error || 'Failed to export report', 'error');
-                } catch {
-                    showMessage('Failed to export report - invalid response', 'error');
-                }
-            }
-        } else {
-            console.log('Response status:', response.status);
-            console.log('Response headers:', response.headers);
-            
-            let errorMessage = 'Failed to export report';
+        if (pendingAttendance.length > 0) {
+            showMessage('Saving latest attendance before export...', 'info');
             try {
-                const errorData = await response.json();
-                console.log('Error data:', errorData);
-                errorMessage = errorData.message || errorData.msg || errorData.error || errorMessage;
+                const saveResp = await fetch('/admin/attendance/bulk', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({
+                        attendance_data: pendingAttendance,
+                        date: selectedDate
+                    })
+                });
+                if (!saveResp.ok) {
+                    let msg = 'Failed to save latest attendance before export';
+                    try {
+                        const data = await saveResp.json();
+                        msg = data.message || data.error || msg;
+                    } catch {}
+                    showMessage(msg, 'error');
+                    return;
+                }
+                // Small delay to ensure backend has committed before export
+                await new Promise(r => setTimeout(r, 800));
             } catch (e) {
-                console.log('Could not parse error response as JSON');
-                const textResponse = await response.text();
-                console.log('Text response:', textResponse);
-                errorMessage = textResponse || errorMessage;
+                // Backend not available — fall back to client-side export
+                return clientSideExportAttendance(selectedDate);
             }
+        }
+        
+        showMessage('Generating Excel report...', 'info');
+        
+        // Test token first
+        const tokenValid = await testToken();
+        if (!tokenValid) {
+            // Backend not available or token invalid — fall back
+            return clientSideExportAttendance(selectedDate);
+        }
+        
+        // Cache-bust to avoid stale downloads
+        const url = `/admin/attendance/export?date=${encodeURIComponent(selectedDate)}&_ts=${Date.now()}`;
+        
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${authToken}`,
+                    'Content-Type': 'application/json',
+                    'Cache-Control': 'no-cache, no-store, must-revalidate'
+                },
+                cache: 'no-store'
+            });
             
-            showMessage(errorMessage, 'error');
+            if (response.ok) {
+                const blob = await response.blob();
+                
+                if (blob.type.includes('spreadsheet') || blob.type.includes('excel') || blob.type.includes('openxml') || blob.type === 'application/octet-stream') {
+                    const downloadUrl = window.URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = downloadUrl;
+                    link.download = `attendance_report_${selectedDate}.xlsx`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    window.URL.revokeObjectURL(downloadUrl);
+                    
+                    showMessage('Excel report downloaded successfully!', 'success');
+                } else {
+                    // If it's not an Excel file, it might be an error response
+                    const text = await blob.text();
+                    try {
+                        const errorData = JSON.parse(text);
+                        showMessage(errorData.message || errorData.error || 'Failed to export report', 'error');
+                    } catch {
+                        showMessage('Failed to export report - invalid response', 'error');
+                    }
+                }
+            } else {
+                // Fallback on non-200
+                clientSideExportAttendance(selectedDate);
+            }
+        } catch (e) {
+            // Network/backend unavailable — fall back
+            clientSideExportAttendance(selectedDate);
         }
     } catch (error) {
         console.error('Export error:', error);
         showMessage('Failed to export report: ' + error.message, 'error');
+    }
+}
+
+function clientSideExportAttendance(selectedDate) {
+    try {
+        // Build rows from current UI state (no server)
+        const rows = [];
+        if (employees && employees.length > 0) {
+            employees.forEach(emp => {
+                const card = document.querySelector(`[data-employee-id="${emp.id}"]`);
+                const status = (card && card.dataset && card.dataset.attendanceStatus) ? card.dataset.attendanceStatus : 'not_marked';
+                rows.push({ name: emp.name || '', email: emp.email || '', status, date: selectedDate });
+            });
+        } else {
+            // Fallback to DOM-only if employees array is empty
+            document.querySelectorAll('.employee-card').forEach(card => {
+                const name = (card.querySelector('h3')?.textContent || '').trim();
+                const emailText = (card.querySelector('p')?.textContent || '').trim();
+                const email = emailText.replace(/^.*\s/, '').trim();
+                const status = card.dataset.attendanceStatus || 'not_marked';
+                rows.push({ name, email, status, date: selectedDate });
+            });
+        }
+        if (rows.length === 0) {
+            showMessage('No employees on screen to export', 'error');
+            return;
+        }
+        const escapeCSV = (val) => {
+            const s = (val ?? '').toString();
+            if (/[",\n]/.test(s)) {
+                return '"' + s.replace(/"/g, '""') + '"';
+            }
+            return s;
+        };
+        const header = ['Name','Email','Status','Date'];
+        const csv = [header.join(',')]
+            .concat(rows.map(r => [escapeCSV(r.name), escapeCSV(r.email), escapeCSV(r.status), escapeCSV(r.date)].join(',')))
+            .join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `attendance_report_${selectedDate}_offline.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        showMessage('Backend unavailable. Downloaded CSV from current screen.', 'info');
+    } catch (e) {
+        showMessage('Local export failed: ' + e.message, 'error');
     }
 }
 
