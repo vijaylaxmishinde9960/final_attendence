@@ -2,113 +2,158 @@
 
 This file provides guidance to WARP (warp.dev) when working with code in this repository.
 
-Project overview
-- Full-stack app: Flask backend (MySQL, JWT) and a React (Vite) dashboard frontend.
+## Project Overview
+
+Attendance Management System - Full-stack app with Flask backend and React (Vite) frontend.
+
+**Architecture:**
+- Backend: Flask REST API with SQLAlchemy ORM, JWT authentication
+- Database: Flexible - MySQL/SQLite via environment config
+- Frontend: React SPA with React Router, Axios, TailwindCSS
 - Two UIs exist:
-  - Legacy Flask-rendered UI at GET / using templates/ and static/.
-  - Modern React SPA under src/ built/served by Vite (dev on port 3000).
-- Backend API is namespaced under /admin and is proxied from the Vite dev server.
+  - Legacy Flask-rendered UI at GET / using templates/ and static/
+  - Modern React SPA under src/ (dev on port 3000, built to dist/)
+- Backend API namespaced under /admin, proxied from Vite dev server
 
-Common commands
-- Backend (Flask)
-  - Install deps
-    ```powershell path=null start=null
-    pip install -r requirements.txt
-    ```
-  - Run API server (default: http://localhost:5000)
-    ```powershell path=null start=null
-    python app.py
-    ```
-  - Optional launcher (tries to run a missing setup script; use app.py directly if this fails)
-    ```powershell path=null start=null
-    python run.py
-    ```
+## Common Commands
 
-- Frontend (Vite + React)
-  - Install deps
-    ```powershell path=null start=null
-    npm install
-    ```
-  - Dev server (http://localhost:3000). Proxies /admin → http://localhost:5000
-    ```powershell path=null start=null
-    npm run dev
-    ```
-  - Build (outputs to dist/)
-    ```powershell path=null start=null
-    npm run build
-    ```
-  - Preview build locally
-    ```powershell path=null start=null
-    npm run preview
-    ```
+**Quick Start (Windows):**
+```powershell path=null start=null
+start_servers.bat
+```
+Starts both Flask backend and React frontend in separate terminal windows.
 
-- Linting & tests
-  - No JavaScript test runner or linter is configured in this repo.
+**Backend (Flask):**
+```powershell path=null start=null
+# Install dependencies
+pip install -r requirements.txt
 
-High-level architecture
-- Backend (Flask)
-  - Entrypoint: app.py. Configures:
-    - CORS for http://localhost:3000.
-    - SQLAlchemy connection via SQLALCHEMY_DATABASE_URI (MySQL).
-    - JWT via Flask-JWT-Extended with 24h access tokens.
-  - Data model (SQLAlchemy): Admin, Department, Employee, Attendance, Leave, Holiday, FileStorage, AuditLog.
-  - Auth: POST /admin/login returns a JWT. Protected endpoints use @jwt_required().
-  - API surface under /admin:
-    - Employees CRUD: /admin/employees, /admin/employees/<id>
-    - Attendance:
-      - POST /admin/attendance (single)
-      - POST /admin/attendance/bulk
-      - GET /admin/attendance/report?date=YYYY-MM-DD
-      - GET /admin/attendance/overview
-      - GET /admin/attendance/validate
-      - DELETE endpoints to remove records by employee/date or by date/month
-      - Export: GET /admin/attendance/export (Excel), GET /admin/attendance/export-pdf (PDF)
-    - Departments CRUD: /admin/departments
-    - Leaves approval: /admin/leaves, /admin/leaves/<id>/approve
-    - Holidays CRUD: /admin/holidays
-    - Files: list/download under /admin/files
-    - Token check: GET /admin/test-token
-  - Startup behavior:
-    - Creates tables on boot.
-    - Ensures a default admin user, a "General" department, and year-based default holidays.
-  - Auditing & files:
-    - log_audit_action(...) captures user actions with metadata.
-    - save_file_to_db(...) persists generated reports (binary) into FileStorage.
+# Run API server (http://localhost:5000)
+python app.py
+```
 
-- Frontend (React + Vite)
-  - Location: src/ with Router-based pages (Dashboard, Employees, Departments, Attendance, AttendanceOverview, Reports, LeaveOvertime).
-  - State/context:
-    - AuthContext: persists JWT in localStorage, sets axios Authorization header, verifies with /admin/test-token.
-    - AttendanceContext: client-side month/status cache and helpers.
-  - Networking:
-    - axios calls to /admin/* are proxied to the Flask server per vite.config.js.
-    - Note: AttendanceContext currently calls /api/admin/... which will not match vite.config.js proxy or backend routes; calls should use /admin/... to work with the proxy and server.
-  - Vite dev server proxy (vite.config.js):
-    - Proxies /admin → http://localhost:5000.
+**Frontend (Vite + React):**
+```powershell path=null start=null
+# Install dependencies
+npm install
 
-- Legacy Flask-rendered UI
-  - GET / returns templates/index.html, which uses static/script.js and static/style.css to operate against /admin APIs.
-  - Exists alongside the React SPA; during development you typically run the Flask API and the Vite dev server separately.
+# Dev server (http://localhost:3000) - proxies /admin → http://localhost:5000
+npm run dev
 
-Development workflow
-- Run backend and frontend concurrently in separate panes:
-  ```powershell path=null start=null
-  # Pane 1: Flask API
-  pip install -r requirements.txt
-  python app.py
-  ```
-  ```powershell path=null start=null
-  # Pane 2: React dev server
-  npm install
-  npm run dev
-  ```
-- Access points:
-  - API: http://localhost:5000 (CORS enabled for the SPA).
-  - React SPA (dev): http://localhost:3000 (uses axios to call /admin/* via proxy).
-  - Legacy UI: http://localhost:5000/ (server-rendered template).
+# Build for production (outputs to dist/)
+npm run build
 
-Repository-specific notes
-- README highlights MySQL usage and mentions a setup_database.py script; that script is not present here. Create the database manually to match SQLALCHEMY_DATABASE_URI in app.py, or add that setup script if desired.
-- Database credentials are configured directly in app.py; update them there (and restart) if your local MySQL differs.
-- The dist/ directory contains a built SPA; Flask does not serve it by default. Use npm run dev for SPA development, or deploy dist/ via a static host or Flask blueprint if desired.
-- No CLAUDE.md, Cursor rules, or GitHub Copilot instruction files were found in this repository.
+# Preview production build
+npm run preview
+```
+
+**Testing & Linting:**
+- No test runner or linter currently configured
+
+## High-Level Architecture
+
+**Backend (Flask - app.py):**
+- Database Configuration (environment-based with fallbacks):
+  1. Reads DATABASE_URL from .env (e.g., mysql+pymysql://user:pass@host:3306/db)
+  2. Falls back to composed MYSQL_* variables (MYSQL_USER, MYSQL_PASSWORD, MYSQL_HOST, MYSQL_PORT, MYSQL_DB)
+  3. Final fallback: SQLite at ./attendance.db
+- CORS enabled for http://localhost:3000
+- JWT authentication via Flask-JWT-Extended (24h access tokens)
+- Connection pooling with pre-ping and 300s recycle
+- **Database Models**: Admin, Department, Employee, Attendance, Leave, Holiday, FileStorage, AuditLog
+- **Authentication**: POST /admin/login returns JWT; protected endpoints use @jwt_required()
+- **Database Initialization**: Tables created automatically on startup; seeds default admin user, "General" department, and current year's holidays
+- **API Endpoints** (all under /admin):
+  - **Auth**: POST /admin/login, GET /admin/test-token
+  - **Employees**: GET/POST /admin/employees, PUT/DELETE /admin/employees/<id>
+  - **Departments**: GET/POST /admin/departments, PUT/DELETE /admin/departments/<id>
+  - **Attendance**:
+    - POST /admin/attendance (single record)
+    - POST /admin/attendance/bulk (batch marking)
+    - GET /admin/attendance/report?date=YYYY-MM-DD
+    - GET /admin/attendance/overview
+    - GET /admin/attendance/validate
+    - DELETE /admin/attendance/* (by employee/date or month)
+    - GET /admin/attendance/export (Excel)
+    - GET /admin/attendance/export-pdf (PDF)
+  - **Leaves**: GET/POST /admin/leaves, POST /admin/leaves/<id>/approve
+  - **Holidays**: GET/POST/PUT/DELETE /admin/holidays
+  - **Files**: GET /admin/files, GET /admin/files/<id>
+- **Helper Functions**:
+  - `log_audit_action()`: Logs user actions with IP, user agent, old/new values
+  - `save_file_to_db()`: Persists generated reports as binary in FileStorage table
+
+**Frontend (React + Vite):**
+- **Structure**: src/ with pages/, components/, contexts/
+  - Pages: Dashboard, Employees, Departments, Attendance, AttendanceOverview, Reports, LeaveOvertime
+- **State Management**:
+  - `AuthContext`: JWT persistence in localStorage, sets axios Authorization header, verifies tokens via /admin/test-token
+  - `AttendanceContext`: Client-side attendance cache by month/date, provides helpers for marking attendance
+- **Networking**:
+  - Axios configured to call /admin/* endpoints
+  - Vite dev server proxies /admin → http://localhost:5000
+  - ⚠️ **Known Issue**: Some AttendanceContext code may call /api/admin/... (incorrect); should be /admin/... to match proxy
+- **Styling**: TailwindCSS with PostCSS, custom components, Framer Motion animations
+
+**Legacy UI:**
+- Flask-rendered template at GET / (templates/index.html)
+- Uses static/script.js and static/style.css
+- Calls same /admin API endpoints as React app
+- Can be accessed at http://localhost:5000 when Flask is running
+
+## Development Workflow
+
+**Option 1: Automated (Windows)**
+```powershell path=null start=null
+start_servers.bat
+```
+
+**Option 2: Manual (run in separate terminals)**
+```powershell path=null start=null
+# Terminal 1: Flask backend
+python app.py
+
+# Terminal 2: React frontend
+npm run dev
+```
+
+**Access Points:**
+- React SPA: http://localhost:3000 (proxies API calls)
+- Flask API: http://localhost:5000 (CORS enabled)
+- Legacy UI: http://localhost:5000/ (Flask template)
+
+**Default Credentials:**
+- Username: `admin`
+- Password: `admin123`
+
+## Environment Configuration
+
+Create a `.env` file in the project root for database configuration:
+
+```env path=null start=null
+# Option 1: Full database URL
+DATABASE_URL=mysql+pymysql://user:password@localhost:3306/attendance_system
+
+# Option 2: Individual MySQL variables
+MYSQL_USER=root
+MYSQL_PASSWORD=your_password
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_DB=attendance_system
+
+# Option 3: SQLite (default if neither above is set)
+SQLITE_URL=sqlite:///attendance.db
+```
+
+**Database Setup:**
+- Tables are auto-created on first run via SQLAlchemy
+- Default data seeded: admin user (admin/admin123), "General" department, current year holidays
+- For MySQL: create database manually first: `CREATE DATABASE attendance_system CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`
+- For SQLite: no manual setup needed, file created automatically
+
+## Important Notes
+
+- **Security**: Change JWT_SECRET_KEY and SECRET_KEY in app.py for production. Change default admin password after first login.
+- **Database fallback**: If no .env file exists, app falls back to SQLite (./attendance.db)
+- **Frontend builds**: dist/ contains production build but Flask doesn't serve it; use Vite dev server or configure Flask to serve static files
+- **API path bug**: If frontend requests fail, check that code uses /admin/* not /api/admin/* (vite.config.js only proxies /admin)
