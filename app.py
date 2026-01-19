@@ -331,6 +331,32 @@ def admin_login():
         print(f"Login error: {e}")
         return jsonify({'message': 'Internal server error'}), 500
 
+@app.route('/admin/test-token', methods=['GET'])
+@jwt_required()
+def verify_token_endpoint():
+    """Test if JWT token is valid"""
+    try:
+        current_user_id = get_jwt_identity()
+        admin = Admin.query.filter_by(id=int(current_user_id)).first()
+        
+        if admin and admin.is_active:
+            return jsonify({
+                'valid': True,
+                'user': {
+                    'id': admin.id,
+                    'username': admin.username,
+                    'email': admin.email,
+                    'full_name': admin.full_name
+                }
+            }), 200
+        else:
+            return jsonify({'valid': False, 'message': 'User not found or inactive'}), 401
+    except Exception as e:
+        print(f"Token verification error: {e}")
+        return jsonify({'valid': False, 'message': 'Invalid token'}), 401
+
+
+
 @app.route('/admin/employees', methods=['GET'])
 @jwt_required()
 def get_employees():
